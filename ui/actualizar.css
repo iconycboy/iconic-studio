@@ -1,0 +1,6 @@
+/* Estudio de Video — aviso de versión nueva */
+#update-banner:empty { display: none; }
+.update { display: flex; gap: 12px; align-items: center; background: var(--bg2); border: 1px solid var(--accent); border-radius: 14px;
+  padding: 12px 16px; margin-bottom: 18px; }
+.update-icon { font-size: 26px; }
+.upd-notes { white-space: pre-wrap; background: var(--bg3); border-radius: 10px; padding: 10px 12px; max-height: 40vh; overflow-y: auto; }

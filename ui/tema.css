@@ -1,0 +1,147 @@
+/* Iconic Studio — apariencia: temas, tipografías, animaciones, grupos y tiempos.
+   Se carga después de style.css y solo sobrescribe; los colores salen de variables que tema.js cambia. */
+/* letras incluidas en ui/fonts: se ven igual en cualquier PC, con o sin internet */
+@font-face { font-family: "Inter"; src: url("fonts/inter.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono.woff2") format("woff2"); font-weight: 100 800; font-display: swap; }
+@font-face { font-family: "Poppins"; src: url("fonts/poppins-600.woff2") format("woff2"); font-weight: 500 800; font-display: swap; }
+@font-face { font-family: "Fraunces"; src: url("fonts/fraunces.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Caveat"; src: url("fonts/caveat.woff2") format("woff2"); font-weight: 400 700; font-display: swap; }
+
+:root {
+  --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-title: "Poppins", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+  --font-hand: "Caveat", "Segoe Print", cursive;
+  --accent2: color-mix(in srgb, var(--accent) 80%, #000);
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --glow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent), 0 10px 30px -8px color-mix(in srgb, var(--accent) 45%, transparent);
+  --grad: linear-gradient(135deg, var(--accent), var(--accent-b, #b06cff));
+  --radius: 14px;
+  font-family: var(--font-ui);
+}
+html, body { font-family: var(--font-ui); }
+h1, h2, h3, .brand, .path-card h3, .tour-card h3, .modal-card h2, .stat b, .title-input { font-family: var(--font-title); letter-spacing: -.01em; }
+h1 { font-weight: 700; }
+pre, code, kbd, .console pre, .term { font-family: var(--font-mono); }
+
+/* barra superior con cristal y logo con degradado */
+.topbar { background: color-mix(in srgb, var(--bg2) 78%, transparent); backdrop-filter: blur(14px); border-bottom-color: color-mix(in srgb, var(--accent) 18%, var(--line)); }
+.brand { font-size: 17px; }
+
+/* botones */
+.btn { border-radius: 10px; transition: transform .12s ease, box-shadow .2s ease, background .2s ease, border-color .2s; }
+.btn:active { transform: scale(.97); }
+
+/* vistas que entran suaves */
+.view:not(.hidden) { animation: viewIn .35s ease both; }
+@keyframes viewIn { from { opacity: 0; transform: translateY(8px); } }
+.panel > * { animation: rise .35s ease both; }
+.panel > *:nth-child(2) { animation-delay: .04s; } .panel > *:nth-child(3) { animation-delay: .08s; } .panel > *:nth-child(4) { animation-delay: .12s; }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+
+/* saludo */
+
+/* tarjetas de video */
+.grid { gap: 20px; }
+.card { border-radius: 16px; position: relative; transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s, border-color .2s; animation: rise .4s ease both; }
+.card:nth-child(2) { animation-delay: .05s; } .card:nth-child(3) { animation-delay: .1s; } .card:nth-child(4) { animation-delay: .15s; } .card:nth-child(n+5) { animation-delay: .2s; }
+.card:hover { transform: translateY(-2px); }
+.card .thumb { height: 170px; transition: transform .4s ease; position: relative; }
+.card .thumb::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,.55), transparent 55%); }
+.card .info { position: relative; background: var(--bg2); }
+.card h3 { font-size: 16px; }
+.bar { height: 6px; }
+.bar > div { background: var(--accent); transition: width .6s ease; }
+.card-meta2 { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.tagpill { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: var(--bg3); color: var(--muted); display: inline-flex; gap: 4px; align-items: center; }
+.card .group-badge { position: absolute; top: 10px; left: 10px; z-index: 2; font-size: 12px; font-weight: 600; padding: 4px 10px;
+  border-radius: 99px; color: #fff; backdrop-filter: blur(6px); box-shadow: 0 4px 12px rgba(0,0,0,.35); cursor: pointer; }
+.card .dur-badge { position: absolute; top: 10px; right: 10px; z-index: 2; font: 600 12px var(--font-mono); padding: 3px 8px; border-radius: 6px; background: rgba(0,0,0,.6); color: #fff; }
+.card .group-stripe { position: absolute; left: 0; right: 0; top: 0; height: 3px; z-index: 3; }
+
+/* barra de grupos */
+.groupbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: -6px 0 20px; }
+.gchip { border: 1px solid var(--line); background: var(--bg2); color: var(--text); border-radius: 99px; padding: 6px 14px; font: 500 13px var(--font-ui);
+  cursor: pointer; display: inline-flex; gap: 6px; align-items: center; transition: all .2s; }
+.gchip:hover { border-color: var(--gc, var(--accent)); transform: translateY(-1px); }
+.gchip.on { background: var(--gc, var(--accent)); border-color: transparent; color: #fff; box-shadow: 0 6px 16px -6px var(--gc, var(--accent)); }
+.gchip .n { opacity: .7; font-size: 11px; }
+.gchip.add { border-style: dashed; color: var(--muted); }
+.gchip .edit { opacity: 0; margin-left: 2px; font-size: 11px; }
+.gchip:hover .edit { opacity: .8; }
+
+/* selector de grupo en el proyecto / tarjeta */
+.group-select { background: var(--bg); border: 1px solid var(--line); border-radius: 99px; padding: 5px 10px; font-size: 13px; color: var(--text); cursor: pointer; }
+
+/* tiempo estimado */
+.eta-strip { display: flex; gap: 10px; flex-wrap: wrap; margin: -6px 0 18px; }
+.eta { background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; display: flex; gap: 10px; align-items: center; }
+.eta b { font: 600 18px var(--font-title); display: block; }
+.eta span { font-size: 12px; color: var(--muted); }
+.eta .ico { font-size: 22px; }
+
+/* píldora flotante de lo que está trabajando, con cuenta regresiva */
+#taskpill { position: fixed; right: 18px; bottom: 54px; z-index: 30; width: 300px; background: color-mix(in srgb, var(--bg2) 90%, transparent);
+  backdrop-filter: blur(12px); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 14px; padding: 12px 14px;
+  box-shadow: 0 14px 40px rgba(0,0,0,.45); animation: rise .3s ease both; }
+#taskpill.hidden { display: none; }
+#taskpill .tp-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+#taskpill .tp-step { font: 600 14px var(--font-title); }
+#taskpill .tp-time { font: 600 13px var(--font-mono); color: var(--accent); }
+#taskpill .tp-sub { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
+#taskpill .tp-bar { height: 6px; background: var(--bg3); border-radius: 9px; overflow: hidden; }
+#taskpill .tp-bar > div { height: 100%; background: var(--grad); background-size: 200% 100%; animation: flow 2s linear infinite; transition: width 1s linear; }
+@keyframes flow { to { background-position: -200% 0; } }
+
+/* pasos */
+.step { transition: background .2s, transform .15s; border-radius: 10px; }
+.step.active { background: var(--accent-soft); outline-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.step.hecho .dot { animation: pop .4s ease; }
+@keyframes pop { 50% { transform: scale(1.25); } }
+.step.trabajando .dot { border-color: var(--accent); }
+
+/* tarjetas de los dos caminos */
+.path-card { border-radius: 18px; transition: transform .2s, box-shadow .2s; position: relative; overflow: hidden; }
+.path-card > * { position: relative; z-index: 1; }
+.box { border-radius: var(--radius); }
+
+/* panel de apariencia */
+#appearance { position: fixed; top: 0; right: 0; bottom: 0; width: 360px; z-index: 40; background: var(--bg2); border-left: 1px solid var(--line);
+  box-shadow: -20px 0 50px rgba(0,0,0,.4); padding: 22px; overflow: auto; transform: translateX(105%); transition: transform .3s cubic-bezier(.2,.8,.2,1); }
+#appearance.open { transform: none; }
+#appearance h2 { margin: 0 0 4px; }
+#appearance h4 { margin: 20px 0 8px; font: 600 13px var(--font-title); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.theme { border: 2px solid transparent; border-radius: 12px; padding: 8px; cursor: pointer; background: var(--bg); text-align: center; font-size: 12px; transition: transform .15s; }
+.theme:hover { transform: translateY(-2px); }
+.theme.on { border-color: var(--accent); }
+.theme .sw { height: 38px; border-radius: 8px; margin-bottom: 6px; }
+.colorrow { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; }
+.colorrow input[type=color] { width: 44px; height: 30px; border: 0; padding: 0; background: none; cursor: pointer; }
+.fontopts { display: grid; gap: 8px; }
+.fontopt { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; background: var(--bg); }
+.fontopt.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.fontopt b { font-size: 16px; display: block; }
+.range { width: 100%; accent-color: var(--accent); }
+#scrim { position: fixed; inset: 0; z-index: 39; background: rgba(0,0,0,.35); opacity: 0; pointer-events: none; transition: opacity .3s; }
+#scrim.on { opacity: 1; pointer-events: auto; }
+
+/* modal de grupo */
+.emoji-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.emoji-row button { font-size: 20px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; width: 40px; height: 40px; cursor: pointer; }
+.emoji-row button.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.swatches button { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.swatches button.on { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+.modal { animation: fade .2s ease both; }
+.modal-card { animation: popIn .25s cubic-bezier(.2,.8,.2,1) both; border-radius: 18px; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes popIn { from { opacity: 0; transform: scale(.94) translateY(10px); } }
+.toast { animation: rise .25s ease both; border-radius: 12px; }
+
+/* escala de texto elegida en apariencia */
+html { font-size: var(--ui-scale, 14px); }
+body { font-size: var(--ui-scale, 14px); }
+
+.no-motion *, .no-motion *::before, .no-motion *::after { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

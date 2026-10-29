@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Iconic Studio</title>
+<link rel="stylesheet" href="/ui/style.css">
+<link rel="stylesheet" href="/ui/tema.css">
+<link rel="stylesheet" href="/ui/assets.css">
+<link rel="stylesheet" href="/ui/actualizar.css">
+<link rel="stylesheet" href="/ui/estudio.css">
+</head>
+<body>
+
+<!-- ============ PROYECTOS ============ -->
+<section id="view-projects" class="view">
+  <header class="topbar">
+    <div class="brand"><span class="logo"><i data-i="play"></i></span> Iconic Studio</div>
+    <label class="search-wrap"><i data-i="search"></i><input id="search" class="search" placeholder="Buscar un video…"></label>
+    <div class="spacer"></div>
+    <button id="btn-style" class="btn ghost" onclick="showStyle()"><i data-i="palette"></i> Mi estilo</button>
+    <button id="btn-help" class="btn ghost" onclick="showHelp()"><i data-i="help"></i> Ayuda</button>
+    <button id="btn-new" class="btn primary"><i data-i="plus"></i> Nuevo video</button>
+  </header>
+  <main class="projects-wrap">
+    <div class="hello">
+      <h1 id="hello">Hola 👋</h1>
+      <p class="muted">Aquí están todos tus videos. Toca uno para seguir editándolo, o crea uno nuevo.</p>
+    </div>
+    <div id="projects" class="grid"></div>
+    <div id="empty" class="empty hidden">
+      <div class="empty-icon"><i data-i="film"></i></div>
+      <h2>Todavía no tienes videos aquí</h2>
+      <p>Toca <b>«Nuevo video»</b> y elige un video tuyo hablando a cámara.<br>Claude te ayuda con todo lo demás.</p>
+      <button class="btn primary big" onclick="openNew()"><i data-i="plus"></i> Nuevo video</button>
+    </div>
+  </main>
+</section>
+
+<!-- ============ PROYECTO ============ -->
+<section id="view-project" class="view hidden">
+  <header class="topbar">
+    <button class="btn ghost" onclick="showProjects()"><i data-i="back"></i> Mis videos</button>
+    <input id="p-title" class="title-input" spellcheck="false" title="Toca para cambiarle el nombre">
+    <span id="p-progress" class="pill"></span>
+    <div class="spacer"></div>
+    <button id="btn-claude" class="btn claude" onclick="openClaude('libre')" title="Abre a Claude para pedirle lo que quieras sobre este video"><i data-i="sparkles"></i> Hablar con Claude</button>
+    <button id="btn-notes" class="btn ghost" onclick="toggleNotes()"><i data-i="notes"></i> Notas</button>
+    <button class="btn ghost" onclick="openFolder('')" title="Abre la carpeta del proyecto en el explorador"><i data-i="folder"></i></button>
+    <button class="btn ghost" onclick="showHelp()" title="Ayuda"><i data-i="help"></i></button>
+  </header>
+  <div class="project-body">
+    <nav id="steps" class="steps"></nav>
+    <main id="panel" class="panel"></main>
+    <aside id="notes" class="notes hidden">
+      <h3>Notas de este video</h3>
+      <textarea id="p-notes" placeholder="Ideas, para quién es, qué quieres resaltar… Claude también las lee."></textarea>
+      <p class="muted small">Se guardan solas.</p>
+    </aside>
+  </div>
+  <footer id="console" class="console collapsed">
+    <div class="console-head" onclick="toggleConsole()">
+      <span id="console-status">Nada trabajando ahora</span>
+      <span class="muted small">detalles técnicos ▴</span>
+    </div>
+    <pre id="console-log"></pre>
+  </footer>
+</section>
+
+<!-- ============ MI ESTILO ============ -->
+<section id="view-style" class="view hidden">
+  <header class="topbar">
+    <button class="btn ghost" onclick="showProjects()"><i data-i="back"></i> Mis videos</button>
+    <div class="brand">Mi estilo</div>
+    <div class="spacer"></div>
+    <button class="btn ghost" onclick="showHelp('estilo')"><i data-i="help"></i> Ayuda</button>
+  </header>
+  <main class="page">
+    <p class="lead">Esto es lo que Claude sabe de cómo te gustan tus videos. <b>Lo lee antes de editar cada uno.</b>
+      Se va llenando solo cuando le cuentas qué te gustó y qué no, y también puedes escribir reglas tú.</p>
+    <div class="box wide">
+      <h3>Agregar una regla</h3>
+      <div class="row"><input id="rule-new" class="grow" placeholder="Ej: los subtítulos siempre en mayúsculas"
+        onkeydown="if(event.key==='Enter')addRule()"><button class="btn primary" onclick="addRule()">Agregar</button></div>
+      <div class="chips" id="rule-examples"></div>
+    </div>
+    <div class="box wide">
+      <h3>Lo que Claude ya sabe de tu estilo</h3>
+      <div id="rules"></div>
+    </div>
+  </main>
+</section>
+
+<!-- ============ AYUDA ============ -->
+<section id="view-help" class="view hidden">
+  <header class="topbar">
+    <button class="btn ghost" onclick="helpBack()"><i data-i="back"></i> Volver</button>
+    <div class="brand">Ayuda</div>
+    <div class="spacer"></div>
+    <button class="btn primary" onclick="replayTour()"><i data-i="play"></i> Ver el recorrido otra vez</button>
+  </header>
+  <main class="page help" id="help-body"></main>
+</section>
+
+<!-- ============ NUEVO VIDEO ============ -->
+<div id="modal-new" class="modal hidden">
+  <div class="modal-card">
+    <h2>Nuevo video</h2>
+    <p class="muted">Elige el video que grabaste. <b>Tu archivo original no se mueve ni se cambia:</b> la app trabaja sobre una copia.</p>
+    <label>1. El video <span class="muted">(si lo grabaste en varios pedazos, elígelos todos)</span></label>
+    <div id="new-files" class="files"></div>
+    <div class="row">
+      <button class="btn primary" onclick="pickVideo()"><i data-i="plus"></i> Elegir video(s)…</button>
+      <span class="muted small">Para elegir varios a la vez, mantén <kbd>Ctrl</kbd> mientras haces clic en cada uno.</span>
+    </div>
+    <div class="row hidden" id="new-path-row">
+      <input id="new-path" class="grow" placeholder="O pega aquí la ruta de un video y presiona Enter"
+        onkeydown="if(event.key==='Enter'){addNewFile(this.value);this.value=''}">
+    </div>
+    <label>2. Un nombre para reconocerlo</label>
+    <input id="new-title" placeholder="Ej: Reseña del gloss nuevo">
+    <label>3. ¿En qué idioma hablas en el video?</label>
+    <select id="new-lang">
+      <option value="es">Español</option>
+      <option value="en">Inglés</option>
+      <option value="pt">Portugués</option>
+    </select>
+    <div class="row end" style="margin-top:12px">
+      <button class="btn ghost" onclick="closeNew()">Cancelar</button>
+      <button class="btn primary big" onclick="createProject()">Crear</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ GUÍA DE LA VENTANA DE CLAUDE ============ -->
+<div id="modal-claude" class="modal hidden">
+  <div class="modal-card wide">
+    <h2>Así se habla con Claude</h2>
+    <p>Se va a abrir una <b>ventana negra</b> aparte. Es Claude, y funciona como un chat:</p>
+    <div class="term">
+      <div class="term-bar"><span></span><span></span><span></span> Claude · tu video</div>
+      <div class="term-body">
+        <div class="t-claude">● Hola. Ya vi tu video: dura 4 minutos y está transcrito. ¿Qué quieres que haga?</div>
+        <div class="t-me">&gt; quita la parte donde me trabo al inicio<span class="cursor">▌</span></div>
+        <div class="t-ask">¿Puedo ejecutar este comando?<br><b>❯ 1. Yes</b> &nbsp; 2. Yes, and don't ask again &nbsp; 3. No</div>
+      </div>
+    </div>
+    <ol class="steps-list">
+      <li><b>Escribe</b> lo que quieres, como en WhatsApp, y presiona <kbd>Enter</kbd>.</li>
+      <li>Si te pregunta algo con opciones en inglés: <b>Yes</b> = sí, <b>Yes, and don't ask again</b> = sí y no volver a
+        preguntar, <b>No</b> = no. Muévete con las flechas <kbd>↑</kbd> <kbd>↓</kbd> y elige con <kbd>Enter</kbd>
+        (o presiona el número).</li>
+      <li>Para <b>detenerlo</b> si se equivoca: tecla <kbd>Esc</kbd>.</li>
+      <li>Cuando termine, ciérrala con la ✕. <b>Esta app se actualiza sola</b> con lo que haga.</li>
+    </ol>
+    <p class="muted small">La primera vez puede preguntarte si confías en la carpeta: elige <b>Yes</b>.</p>
+    <div class="row end">
+      <label class="check muted small"><input type="checkbox" id="claude-skip"> No volver a mostrar</label>
+      <div class="spacer"></div>
+      <button class="btn ghost" onclick="closeClaudeGuide()">Cancelar</button>
+      <button class="btn claude big" onclick="confirmClaude()">Entendido, abrir Claude</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ RECORRIDO ============ -->
+<div id="tour" class="tour hidden">
+  <div id="tour-hole" class="tour-hole"></div>
+  <div id="tour-card" class="tour-card">
+    <div class="tour-count" id="tour-count"></div>
+    <h3 id="tour-title"></h3>
+    <p id="tour-text"></p>
+    <div class="row end">
+      <button class="btn ghost small-btn" onclick="Tour.end()">Saltar</button>
+      <div class="spacer"></div>
+      <button class="btn small-btn" id="tour-back" onclick="Tour.go(-1)">← Atrás</button>
+      <button class="btn primary small-btn" id="tour-next" onclick="Tour.go(1)">Siguiente →</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/ui/iconos.js"></script>
+<script src="/ui/app.js"></script>
+<script src="/ui/guia.js"></script>
+<script src="/ui/tema.js"></script>
+<script src="/ui/assets.js"></script>
+<script src="/ui/lote.js"></script>
+<script src="/ui/instrucciones.js"></script>
+<script src="/ui/menu.js"></script>
+<script src="/ui/cuenta.js"></script>
+<script src="/ui/carpetas.js"></script>
+<script src="/ui/bienvenida.js"></script>
+<script src="/ui/arrastrar.js"></script>
+<script src="/ui/actualizar.js"></script>
+</body>
+</html>

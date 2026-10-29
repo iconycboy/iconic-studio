@@ -1,0 +1,9 @@
+# lo de cada PC: ajustes, carpetas, caché, registros
+config.json
+grupos.json
+cache/
+# lo que arma publicar.py
+build/
+__pycache__/
+# lo de esta PC: rutas al .zip del editor (ver construir/editor.ejemplo.json)
+construir/editor.json

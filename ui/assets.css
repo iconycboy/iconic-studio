@@ -1,0 +1,139 @@
+/* Iconic Studio — sección de assets */
+.assets-card { width: 720px; }
+.assets-card h2 { margin: 0; }
+.asset-list { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+.asset { display: flex; gap: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.asset.must { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.asset-thumb { width: 84px; height: 84px; flex: none; border-radius: 8px; background: var(--bg3); display: grid; place-items: center;
+  overflow: hidden; font-size: 30px; }
+.asset-thumb img, .asset-thumb video { width: 100%; height: 100%; object-fit: cover; }
+.asset-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.asset-body .btn { padding: 4px 8px; }
+.asset-body textarea, .asset-body input.asset-uso { width: 100%; box-sizing: border-box; }
+.asset-text { font-size: 15px; font-weight: 600; resize: vertical; }
+.asset-group { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
+.asset-group h3 { margin: 0; font-size: 15px; }
+.asset-tip { background: var(--bg3); border-radius: 8px; padding: 8px 10px; }
+#card-assets h3 { margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+#card-assets .chips:empty { display: none; }
+
+/* varios videos a la vez */
+.lote-bar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); width: min(980px, calc(100% - 32px));
+  display: flex; align-items: center; gap: 10px; background: var(--bg2); border: 1px solid var(--accent); border-radius: 14px;
+  padding: 12px 16px; box-shadow: 0 10px 40px #0008; z-index: 9; }
+.lote-bar > div:first-child { display: flex; flex-direction: column; gap: 2px; }
+#projects.picking { padding-bottom: 90px; }
+#projects.picking .card { outline: 2px solid transparent; }
+#projects.picking .card.picked { outline-color: var(--accent); border-color: var(--accent); }
+.pick-box { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 44px; height: 44px; border-radius: 12px;
+  border: 3px solid #fff; background: #0007; display: grid; place-items: center; color: #fff; font-size: 26px; font-weight: 700;
+  box-shadow: 0 4px 16px #0008; }
+.card.picked .pick-box { background: var(--accent); border-color: var(--accent); }
+.card .thumb { position: relative; }
+.pick-wait { position: absolute; left: 10px; bottom: 10px; font-size: 12px; background: #000a; color: #fff; padding: 3px 8px;
+  border-radius: 99px; display: flex; gap: 6px; align-items: center; }
+.sep-choice { display: flex; flex-direction: column; gap: 6px; background: var(--bg3); border-radius: 8px; padding: 10px; margin-top: 4px; }
+.sep-choice .check { align-items: flex-start; }
+
+/* instrucciones para Claude */
+.instr textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+.instr-block { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.instr-group { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; }
+.instr-read { white-space: pre-wrap; background: var(--bg3); border-radius: 8px; padding: 8px 10px; margin: 6px 0 0; }
+#card-instr h3 { margin: 0 0 4px; }
+
+/* menú ⋯ */
+.card .info { position: relative; }
+.card-menu { position: absolute; top: 8px; right: 8px; width: 30px; height: 28px; border-radius: 8px; border: 1px solid transparent;
+  background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+.card-menu:hover { background: var(--bg3); border-color: var(--line); color: var(--text); }
+.card .info h3 { padding-right: 32px; }
+.card-menu-pop .step.danger { color: var(--err); }
+.menu-sep { height: 1px; background: var(--line); margin: 4px 2px; }
+.btn.danger-fill { background: var(--err); color: #fff; border-color: var(--err); }
+
+/* cuenta de Claude */
+.acc-now { display: flex; gap: 10px; align-items: center; background: var(--bg3); border-radius: 10px; padding: 10px 12px; }
+.acc-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--err); flex: none; }
+.acc-dot.on { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent); }
+.acc-step { align-items: flex-start; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.acc-done { font-size: 16px; background: color-mix(in srgb, var(--ok) 15%, var(--bg3)); border-radius: 10px; padding: 12px; }
+#btn-cuenta .acc-mail { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+#modal-cuenta h3 { margin: 10px 0 4px; }
+
+/* barra de arriba: que todo quepa en la ventana más chica */
+.topbar .btn, .topbar .brand { white-space: nowrap; flex: none; }
+#view-projects .topbar .search { flex: 0 1 220px; min-width: 90px; width: auto; }
+#view-project .topbar #p-title { flex: 1 1 200px; min-width: 100px; width: auto; }
+@media (max-width: 1250px) { #view-project .topbar #p-progress { display: none; } }
+
+/* carpetas */
+.section-label { font-weight: 600; margin: 6px 0 10px; display: flex; gap: 8px; align-items: baseline; border-radius: 8px; padding: 4px 6px; }
+.folder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; margin-bottom: 22px; }
+.folder { position: relative; cursor: pointer; padding-top: 12px; transition: transform .15s; }
+.folder:hover { transform: translateY(-2px); }
+.folder-tab { position: absolute; top: 0; left: 0; width: 42%; height: 18px; border-radius: 10px 10px 0 0;
+  background: color-mix(in srgb, var(--gc, var(--accent)) 70%, var(--bg3)); }
+.folder-body { position: relative; background: var(--bg2); border: 1px solid var(--line); border-top: 4px solid var(--gc, var(--accent));
+  border-radius: 0 14px 14px 14px; padding: 12px; display: flex; gap: 12px; align-items: center; min-height: 86px; }
+.folder:hover .folder-body { border-color: var(--gc, var(--accent)); }
+.folder.add .folder-body { border-style: dashed; border-top-width: 1px; border-radius: 14px; background: transparent; }
+.folder.add { padding-top: 12px; }
+.folder-thumbs { position: relative; width: 72px; height: 72px; flex: none; }
+.folder-thumbs span { position: absolute; width: 52px; height: 64px; border-radius: 8px; background: var(--bg3) center/cover;
+  border: 2px solid var(--bg2); left: calc(var(--i) * 10px); top: calc(var(--i) * 4px); box-shadow: 0 2px 8px #0006; }
+.folder-emoji { font-size: 34px; width: 72px; height: 72px; display: grid; place-items: center; background: var(--bg3); border-radius: 12px; flex: none; }
+.folder-info h3 { margin: 0 0 2px; font-size: 15px; }
+.folder-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.folder-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; padding: 12px 14px;
+  background: var(--bg2); border: 1px solid var(--line); border-left: 5px solid var(--gc, var(--accent)); border-radius: 14px; }
+.folder-head h2 { margin: 0; font-size: 20px; }
+.folder-title { display: flex; align-items: center; gap: 10px; }
+.folder-big { font-size: 30px; }
+.folder-empty { border: 1px dashed var(--line); border-radius: 14px; padding: 24px; text-align: center; color: var(--muted); margin-bottom: 16px; }
+body.dragging [data-drop] { outline: 2px dashed color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 3px; }
+[data-drop].drop-on, .folder.drop-on .folder-body { outline: 3px solid var(--accent) !important; background: color-mix(in srgb, var(--accent) 12%, var(--bg2)); }
+.lote-kit { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: var(--bg3); border-radius: 10px; padding: 10px 12px;
+  border-left: 4px solid var(--gc, var(--accent)); }
+.lote-kit .row { flex: 1 1 100%; }
+.lote-kit input { flex: 1; }
+
+/* primera vez e instalación */
+.hola-icon { font-size: 44px; text-align: center; }
+#modal-hola h2 { text-align: center; }
+#install-banner:empty { display: none; }
+.install { display: flex; gap: 14px; align-items: center; background: var(--bg2); border: 1px solid var(--accent); border-radius: 14px;
+  padding: 14px 16px; margin-bottom: 18px; }
+.install-icon { font-size: 30px; }
+.install.warn-box { border-color: var(--warn); }
+
+/* ventanas largas: barra para bajar en vez de salirse de la pantalla */
+.modal { padding: 16px; box-sizing: border-box; }
+.modal-card { max-height: calc(100vh - 32px); overflow-y: auto; overscroll-behavior: contain; }
+.modal-card::-webkit-scrollbar, .fold-list::-webkit-scrollbar, .panel::-webkit-scrollbar { width: 10px; }
+.modal-card::-webkit-scrollbar-thumb, .fold-list::-webkit-scrollbar-thumb, .panel::-webkit-scrollbar-thumb {
+  background: var(--line); border-radius: 10px; border: 2px solid var(--bg2); }
+.modal-card::-webkit-scrollbar-thumb:hover, .fold-list::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+#modal-lote .files { max-height: 240px; overflow-y: auto; }
+
+/* listas que se pliegan */
+.fold-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: var(--bg3); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 8px 10px;
+  font: inherit; cursor: pointer; margin-bottom: 4px; }
+.fold-head:hover { border-color: var(--accent); }
+.fold-names { display: inline-block; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.fold-arrow { color: var(--accent); font-size: 12px; white-space: nowrap; }
+.fold-list { display: none; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; padding-right: 4px; margin-bottom: 4px; }
+.fold-list.open { display: flex; }
+
+/* arrastrar archivos encima de la ventana */
+#drop-zone { position: fixed; inset: 0; z-index: 60; display: none; place-items: center; pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 18%, #000a); }
+#drop-zone.on { display: grid; }
+#drop-zone .dz-card { border: 3px dashed #fff; border-radius: 22px; padding: 36px 48px; text-align: center; color: #fff;
+  background: #0008; max-width: 560px; }
+.dz-icon { font-size: 46px; }
+.dz-msg { font-size: 18px; font-weight: 600; margin-top: 8px; }
+/* los botones de abajo de cada ventana siempre a la vista, aunque la ventana tenga scroll */
+.modal-card > .row.end:last-child { position: sticky; bottom: -24px; z-index: 2; margin: 4px -24px -24px; padding: 12px 24px;
+  background: var(--bg2); border-top: 1px solid var(--line); border-radius: 0 0 18px 18px; }
