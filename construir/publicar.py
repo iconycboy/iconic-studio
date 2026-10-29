@@ -73,7 +73,7 @@ def subir_editor(repo: str, pkg: Path) -> None:
             "--notes", "El editor que la app de Mac copia la primera vez. No es una versión de la app.",
             "--prerelease", "--latest=false")
     sha_file = BUILD / "video-editor.zip.sha256"
-    sha_file.write_text(f"{sha}  video-editor.zip\n", encoding="utf-8")
+    sha_file.write_text(f"{sha}  video-editor.zip\n", encoding="utf-8", newline="\n")  # la Mac lo lee con shasum
     run("gh", "release", "upload", "editor", "--repo", repo, "--clobber", pkg, sha_file)
 
 
