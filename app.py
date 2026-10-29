@@ -34,10 +34,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.0.0"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.0.1"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
+APP_PORT = 47821  # fijo a propósito: ver main()
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".m4v"}
 
 # Pasos en orden. "auto" = la app lo lanza sola al importar.
@@ -1634,13 +1635,34 @@ def bind_drop(window) -> None:
         pass
 
 
+class ExclusiveServer(ThreadingHTTPServer):
+    """Sin compartir el puerto: en Windows, SO_REUSEADDR (lo que usa http.server) deja que dos programas tomen el
+    mismo puerto y el segundo le roba las conexiones al primero. Así, si ya está tomado, falla y se usa otro."""
+    allow_reuse_address = False
+
+    def server_bind(self):
+        import socket
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def main():
     try:
         ensure_app_rules()
     except OSError:
         pass
     port = int(sys.argv[sys.argv.index("--serve") + 1]) if "--serve" in sys.argv else 0
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    if port:
+        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    else:
+        # siempre la misma dirección: la página guarda lo ya visto (el recorrido, la apariencia, «no volver a mostrar»)
+        # por dirección, y con un puerto distinto en cada arranque lo olvidaba todo. Si está ocupado (la app ya
+        # abierta dos veces), uno libre cualquiera.
+        try:
+            server = ExclusiveServer(("127.0.0.1", APP_PORT), Handler)
+        except OSError:
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     if port:  # solo servidor (pruebas)
         print(url, flush=True)
