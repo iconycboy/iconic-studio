@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.3.0"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.4.0"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
@@ -1312,7 +1312,7 @@ def _queue_save(q: dict) -> None:
     write_json(QUEUE_FILE, q)
 
 
-def start_queue(jobs: list[str], extra: str = "", modo: str = "completo", modelo: str = "") -> dict:
+def start_queue(jobs: list[str], extra: str = "", modo: str = "completo", modelo: str = "", paralelo: int = 1) -> dict:
     jobs = list(dict.fromkeys(j for j in jobs if (PROJECTS / j).is_dir() and raw_clip(j)))
     if not jobs:
         raise ValueError("elige al menos un video (que ya tenga su video importado)")
@@ -1322,6 +1322,7 @@ def start_queue(jobs: list[str], extra: str = "", modo: str = "completo", modelo
     qid = datetime.now().strftime("%Y%m%d-%H%M%S")
     q = {"id": qid, "jobs": jobs, "extra": extra.strip(), "modo": "rapido" if modo == "rapido" else "completo",
          "modelo": modelo if modelo in MODELOS else "", "fase": "transcribiendo", "actual": -1, "inicio_video": 0,
+         "paralelo": 2 if paralelo == 2 else 1, "activos": [], "hechos": [],
          "entrega": str(APP_DIR / "cache" / f"entrega-{qid}"), "creado": time.time(), "intentados": [], "entregados": []}
     Path(q["entrega"]).mkdir(parents=True, exist_ok=True)
     for j in jobs:  # para la insignia «en lote» de las tarjetas
@@ -1337,25 +1338,40 @@ def queue_prompt(job: str, k: int, n: int, q: dict) -> str:
     rapido = MODO_RAPIDO.format(u=USUARIO) if q["modo"] == "rapido" else ""
     extra = f"INSTRUCCIONES PARA ESTE LOTE:\n{q['extra']}\n" if q.get("extra") else ""
     return (p + "\n\n" + rapido + extra
-            + f"Este video es el {k} de {n} de un lote que la app edita uno por uno, cada uno en su propia ventana: haz SOLO "
-              "este video. El finalize deja la copia en la carpeta de entrega del lote (VE_EXPORT_DIR): la app la pasa a "
+            + f"Este video es el {k} de {n} de un lote que la app edita "
+              + ("de a dos a la vez" if q.get("paralelo") == 2 else "uno por uno")
+              + ", cada uno en su propia ventana: haz SOLO este video. "
+              + ("Otra ventana edita otro video al mismo tiempo: no toques sus archivos, y si tuvieras que transcribir, espera "
+                 "a que no haya otra transcripción corriendo en la PC (una a la vez). " if q.get("paralelo") == 2 else "")
+              + "El finalize deja la copia en la carpeta de entrega del lote (VE_EXPORT_DIR): la app la pasa a "
               f"Descargas cuando estén todos. Cuando termines, dile a {USUARIO} en una línea que este quedó y que puede "
               "cerrar esta ventana: la app abre sola el siguiente.")
 
 
-def _video_done(job: str, q: dict) -> bool:
+def _video_done(job: str, inicio: float, q: dict) -> bool:
     if (Path(q["entrega"]) / f"{job}.final.mp4").exists():
         return True
     final = job_dir(job) / "outputs" / f"{job}.final.mp4"
-    return final.exists() and final.stat().st_mtime >= q.get("inicio_video", 0)
+    return final.exists() and final.stat().st_mtime >= inicio
 
 
-def _launch_queue_video(q: dict) -> None:
-    job = q["jobs"][q["actual"]]
+def _activos(q: dict) -> list[dict]:
+    """Los videos que Claude edita ahora, cada uno con cuándo empezó. Un lote de una versión anterior (uno por uno,
+    con «actual») se pasa a esta forma solo."""
+    if "activos" not in q:
+        a = q.get("actual", -1)
+        editando = q.get("fase") == "editando" and 0 <= a < len(q.get("jobs", []))
+        q["activos"] = [{"job": q["jobs"][a], "inicio": q.get("inicio_video", 0)}] if editando else []
+        q["hechos"] = q["jobs"][:a] if editando else []
+    return q["activos"]
+
+
+def _launch_queue_video(q: dict, job: str) -> None:
+    k = q["jobs"].index(job) + 1
     pf = studio_dir(job) / "claude-contexto.txt"
-    pf.write_text(_plain(queue_prompt(job, q["actual"] + 1, len(q["jobs"]), q)), encoding="utf-8")
-    q["inicio_video"] = time.time()
-    launch_claude(f"{q['actual'] + 1} de {len(q['jobs'])} · {state_of(job)['titulo']}", pf, q.get("modelo", ""),
+    pf.write_text(_plain(queue_prompt(job, k, len(q["jobs"]), q)), encoding="utf-8")
+    _activos(q).append({"job": job, "inicio": time.time()})
+    launch_claude(f"{k} de {len(q['jobs'])} · {state_of(job)['titulo']}", pf, q.get("modelo", ""),
                   {"VE_EXPORT_DIR": to_posix(q["entrega"])})
 
 
@@ -1389,22 +1405,35 @@ def queue_tick() -> None:
                 except Exception:  # noqa: BLE001
                     pass
                 return
-            q["fase"], q["actual"] = "editando", 0
-            _launch_queue_video(q)
+            q["fase"], q["activos"], q["hechos"] = "editando", [], []
+            _queue_fill(q)
             _queue_save(q)
         elif fase == "editando":
-            job = q["jobs"][q["actual"]]
-            if not (q.get("saltar") or _video_done(job, q)):
+            act = _activos(q)
+            antes = (len(act), len(q["hechos"]))
+            for a in list(act):
+                if _video_done(a["job"], a["inicio"], q):
+                    act.remove(a)
+                    q["hechos"].append(a["job"])
+            if q.pop("saltar", None) and act:  # «Pasar al siguiente»: el que lleva más tiempo
+                q["hechos"].append(act.pop(0)["job"])
+            if (len(act), len(q["hechos"])) == antes:
                 return
-            q.pop("saltar", None)
-            if q["actual"] + 1 < len(q["jobs"]):
-                q["actual"] += 1
-                _launch_queue_video(q)
-            else:
+            _queue_fill(q)
+            if not act:
                 q["entregados"] = _deliver(q)
                 q["fase"], q["fin"] = "terminado", time.time()
                 notify("Iconic Studio", f"¡Listos tus {len(q['jobs'])} videos! Están en Descargas.")
             _queue_save(q)
+
+
+def _queue_fill(q: dict) -> None:
+    """Abre los videos que faltan hasta tener los que van a la vez (1, o 2)."""
+    act = _activos(q)
+    pend = [j for j in q["jobs"] if j not in q["hechos"] and j not in {a["job"] for a in act} and (PROJECTS / j).is_dir()]
+    while pend and len(act) < q.get("paralelo", 1):
+        _launch_queue_video(q, pend.pop(0))
+    q["actual"] = len(q["hechos"])  # para la tarjeta: «video N de M»
 
 
 def queue_control(accion: str) -> dict:
@@ -1426,14 +1455,16 @@ def queue_status() -> dict:
     if not q:
         return {}
     vids = []
-    for i, j in enumerate(q.get("jobs", [])):
+    act = {a["job"] for a in _activos(q)}
+    for j in q.get("jobs", []):
         if not (PROJECTS / j).is_dir():
             continue
-        estado = ("listo" if i < q["actual"] or q["fase"] == "terminado" else
-                  "editando" if i == q["actual"] and q["fase"] == "editando" else
+        estado = ("listo" if j in q["hechos"] or q["fase"] == "terminado" else
+                  "editando" if j in act and q["fase"] == "editando" else
                   "transcribiendo" if q["fase"] == "transcribiendo" and TASK.running and TASK.job == j else "en fila")
         vids.append({"job": j, "titulo": state_of(j)["titulo"], "estado": estado, "avance": run_progress(j)})
-    return {k: q.get(k) for k in ("id", "fase", "actual", "modo", "modelo", "entregados", "creado", "fin")} | {"videos": vids}
+    return ({k: q.get(k) for k in ("id", "fase", "actual", "modo", "modelo", "entregados", "creado", "fin")}
+            | {"paralelo": q.get("paralelo", 1), "videos": vids})
 
 
 def _queue_loop() -> None:
@@ -1902,7 +1933,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True})
         if parts[:2] == ["api", "lote"]:
             start_queue([str(j) for j in body.get("jobs", [])], str(body.get("instrucciones", "")),
-                        str(body.get("modo", "completo")), str(body.get("modelo", "")))
+                        str(body.get("modo", "completo")), str(body.get("modelo", "")), int(body.get("paralelo") or 1))
             return self._json({"ok": True})
         if parts[:2] == ["api", "projects"]:
             origen = body.get("origenes") or [body.get("origen", "")]

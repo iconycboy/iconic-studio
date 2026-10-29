@@ -3,7 +3,7 @@
 // aprendido de cada carpeta.
 
 const I = (n) => (typeof ico === "function" ? ico(n) : "");
-const LOTE_OPT = { modo: store("lote-modo") || "completo", modelo: store("lote-modelo") || "sonnet" };
+const LOTE_OPT = { modo: store("lote-modo") || "completo", modelo: store("lote-modelo") || "sonnet", paralelo: store("lote-paralelo") || "1" };
 
 // ------------------------------------------------------------------ ventana de «editar juntos»: modo y modelo
 const _openLoteQ = openLote;
@@ -13,7 +13,7 @@ openLote = async function () {
   if (!card) return;
   const n = LOTE.sel.size;
   const intro = card.querySelector("h2 + p");
-  if (intro) intro.innerHTML = `Claude los edita <b>uno por uno, cada uno en una ventana nueva</b>: así cada video empieza liviano,
+  if (intro) intro.innerHTML = `Claude los edita <b>cada uno en una ventana nueva</b> (uno por uno, o de a dos): así cada video empieza liviano,
     gasta menos y no se pone lento. Antes, la app transcribe gratis los que falten. <b>Cuando estén los ${n}, aparecen juntos en
     tu carpeta Descargas</b> y te llega un aviso.`;
   const opt = (k, v, t, d) => `<label class="opt ${LOTE_OPT[k] === v ? "on" : ""}"><input type="radio" name="lote-${k}" value="${v}"
@@ -25,11 +25,14 @@ openLote = async function () {
       ${opt("modo", "rapido", "⚡ Rápido", "Corte, audio, subtítulos y exportar. Gasta mucho menos: ideal para muchos videos.")}</div>
     <label>Claude</label><div class="opts">
       ${opt("modelo", "sonnet", "Rápido (Sonnet)", "Más rápido y gasta menos de tu plan. Recomendado para lotes.")}
-      ${opt("modelo", "opus", "Máximo (Opus)", "El más capaz, para videos especiales. Gasta más.")}</div></div>`);
+      ${opt("modelo", "opus", "Máximo (Opus)", "El más capaz, para videos especiales. Gasta más.")}</div>
+    <label>Cuántos a la vez</label><div class="opts">
+      ${opt("paralelo", "1", "Uno por uno", "El más seguro. Gasta tu plan más despacio.")}
+      ${opt("paralelo", "2", "⏩ 2 a la vez", "Terminan antes, pero tu plan se gasta el doble de rápido y la PC va más cargada.")}</div></div>`);
 };
 const _apiQ = api;
 api = function (path, body) {  // el modo y el modelo viajan con el pedido del lote
-  if (path === "/api/lote" && body) body = { ...body, modo: LOTE_OPT.modo, modelo: LOTE_OPT.modelo };
+  if (path === "/api/lote" && body) body = { ...body, modo: LOTE_OPT.modo, modelo: LOTE_OPT.modelo, paralelo: +LOTE_OPT.paralelo || 1 };
   const r = _apiQ(path, body);
   if (path === "/api/lote" && body) r.then(() => setTimeout(loadQueue, 500)).catch(() => {});
   return r;
@@ -53,7 +56,8 @@ function renderQueue() {
   if (!q || !q.fase || !q.videos) { b.innerHTML = ""; return; }
   const n = q.videos.length, done = q.videos.filter((v) => v.estado === "listo").length;
   const head = { transcribiendo: `${I("film")} Preparando el lote: la app transcribe los videos (gratis)…`,
-    editando: `${I("sparkles")} Claude está editando el video ${q.actual + 1} de ${n}`,
+    editando: q.paralelo === 2 ? `${I("sparkles")} Claude está editando 2 videos a la vez · ${done} de ${n} listos`
+      : `${I("sparkles")} Claude está editando el video ${q.actual + 1} de ${n}`,
     terminado: `✅ ¡Listos los ${n} videos! Ya están en tu carpeta Descargas.`,
     detenido: `Lote detenido. ${done ? `Los ${done} terminados están en Descargas.` : ""}` }[q.fase] || "";
   b.innerHTML = `<div class="queue ${q.fase}"><div class="row"><div class="grow"><b>${head}</b>
