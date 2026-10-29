@@ -47,9 +47,9 @@ Source: "{#Build}\app\*"; DestDir: "{app}\estudio"; Flags: ignoreversion recurse
 Source: "{#Build}\video-editor\*"; DestDir: "{app}\video-editor"; Flags: ignoreversion recursesubdirs createallsubdirs uninsneveruninstall; Check: InstalarEditor
 
 [Icons]
-Name: "{group}\Iconic Studio"; Filename: "{app}\estudio\Iconic Studio.exe"; WorkingDir: "{app}\estudio"
+Name: "{group}\Iconic Studio"; Filename: "{app}\estudio\Iconic Studio.exe"; WorkingDir: "{app}\estudio"; IconFilename: "{app}\estudio\icono.ico"
 Name: "{group}\Desinstalar Iconic Studio"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\Iconic Studio"; Filename: "{app}\estudio\Iconic Studio.exe"; WorkingDir: "{app}\estudio"; Tasks: escritorio
+Name: "{userdesktop}\Iconic Studio"; Filename: "{app}\estudio\Iconic Studio.exe"; WorkingDir: "{app}\estudio"; IconFilename: "{app}\estudio\icono.ico"; Tasks: escritorio
 
 [Run]
 Filename: "{code:Winget}"; Parameters: "install --exact --id Git.Git --silent --accept-package-agreements --accept-source-agreements"; StatusMsg: "Instalando Git (lo usa el editor por dentro)… si Windows pregunta si permites cambios, toca «Sí»"; Flags: waituntilterminated runhidden; Check: FaltaGit

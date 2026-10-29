@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.1.0"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.2.0"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
@@ -1923,6 +1923,24 @@ def bind_drop(window) -> None:
         pass
 
 
+def refresh_shortcut_icons() -> None:
+    """Los accesos directos del .exe (escritorio y menú Inicio) con el ícono de icono.ico. El .exe trae su ícono
+    adentro y una actualización de un clic no lo cambia; icono.ico sí llega con cada versión, así que el ícono nuevo
+    se ve también en las PCs que actualizan con el botón."""
+    if not getattr(sys, "frozen", False) or not (APP_DIR / "icono.ico").exists():
+        return
+    ps = ("$sh = New-Object -ComObject WScript.Shell; "
+          "$dirs = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs')); "
+          "foreach ($d in $dirs) { Get-ChildItem -LiteralPath $d -Filter '*.lnk' -Recurse -Depth 1 -ErrorAction SilentlyContinue | "
+          "ForEach-Object { $l = $sh.CreateShortcut($_.FullName); "
+          f"if ($l.TargetPath -eq '{sys.executable}' -and $l.IconLocation -ne '{APP_DIR / 'icono.ico'},0') "
+          f"{{ $l.IconLocation = '{APP_DIR / 'icono.ico'},0'; $l.Save() }} }} }}")
+    try:
+        subprocess.Popen(["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps], creationflags=NO_WINDOW)
+    except OSError:
+        pass
+
+
 class ExclusiveServer(ThreadingHTTPServer):
     """Sin compartir el puerto: en Windows, SO_REUSEADDR (lo que usa http.server) deja que dos programas tomen el
     mismo puerto y el segundo le roba las conexiones al primero. Así, si ya está tomado, falla y se usa otro."""
@@ -1940,6 +1958,7 @@ def main():
         ensure_app_rules()
     except OSError:
         pass
+    refresh_shortcut_icons()
     port = int(sys.argv[sys.argv.index("--serve") + 1]) if "--serve" in sys.argv else 0
     if port:
         server = ThreadingHTTPServer(("127.0.0.1", port), Handler)

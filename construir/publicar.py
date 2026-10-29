@@ -79,8 +79,14 @@ def main():
                 dest = BUILD / info.filename
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(z.read(info))
-    for rel in cfg.get("arreglos", []):  # archivos del editor con arreglos propios
-        shutil.copy2(Path(cfg["editor_instalado"]) / rel, ed / rel)
+    # el editor con los arreglos propios: la primera de las rutas que exista (puede haberse mudado de carpeta)
+    sitios = cfg["editor_instalado"] if isinstance(cfg["editor_instalado"], list) else [cfg["editor_instalado"]]
+    instalado = next((Path(s) for s in sitios if (Path(s) / "CLAUDE.md").exists()), None)
+    for rel in cfg.get("arreglos", []):
+        if instalado:
+            shutil.copy2(instalado / rel, ed / rel)
+        else:
+            print(f"  ⚠ no encuentro el editor instalado: {rel} va sin el arreglo")
 
     print("▸ compilando el instalador")
     iscc = next((p for p in ISCC if p.exists()), None) or sys.exit("falta Inno Setup (winget install JRSoftware.InnoSetup)")
