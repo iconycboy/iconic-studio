@@ -552,8 +552,8 @@ document.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
   if (k === "delete") { edCut(); e.preventDefault(); }
   else if (k === "backspace") { edRestore(); e.preventDefault(); }
-  else if (e.ctrlKey && k === "z") { e.shiftKey ? edRedo() : edUndo(); e.preventDefault(); }
-  else if (e.ctrlKey && k === "y") { edRedo(); e.preventDefault(); }
+  else if ((e.ctrlKey || e.metaKey) && k === "z") { e.shiftKey ? edRedo() : edUndo(); e.preventDefault(); }
+  else if ((e.ctrlKey || e.metaKey) && k === "y") { edRedo(); e.preventDefault(); }
   else if (k === " ") { const v = $("#vid"); v.paused ? v.play() : v.pause(); e.preventDefault(); }
 });
 

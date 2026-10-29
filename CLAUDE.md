@@ -11,7 +11,11 @@ la carpeta de al lado. Habla con el usuario en español sencillo.
   `instrucciones.js`, `menu.js`, `cuenta.js`, `carpetas.js`, `bienvenida.js`, `arrastrar.js`, `actualizar.js`, `cola.js` (lotes en fila, modo Rápido/Completo, modelo, avance de Claude desde RUN.md, estilo de carpeta), `comentar.js`, `material.js`)
   agrega una función envolviendo las de antes, y se cargan en ese orden.
 - `construir/` — `lanzador.py` (el .exe de PyInstaller: Python + pywebview, que corre el `app.py` suelto de al lado),
-  `instalador.iss` (Inno Setup), `publicar.py`, `editor.json` (local, ver `editor.ejemplo.json`).
+  `instalador.iss` (Inno Setup), `publicar.py`, `editor.json` (local, ver `editor.ejemplo.json`), `mac.sh` (la .app
+  y el .dmg de Mac).
+- Mac: `MAC` en `app.py` (Terminal en vez de PowerShell, Finder, Papelera, avisos con osascript) y `ui/sistema.js`
+  (los textos dicen Finder / Terminal / Mac / ⌘). La .app la compila GitHub en cada release
+  (`.github/workflows/mac.yml`); el editor que lleva lo baja de la release «editor», que sube `publicar.py`.
 - No se suben (ver `.gitignore`): `config.json`, `grupos.json`, `cache/`, `build/`.
 - Debe funcionar con Python 3.10, 3.11 y 3.12: nada de `\` dentro de las llaves de un f-string.
 

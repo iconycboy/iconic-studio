@@ -6,6 +6,22 @@ De uso libre.
 **Abrir:** doble clic en "Iconic Studio" en el escritorio
 (si falla: `Iniciar Estudio.cmd` en esta carpeta, que muestra el error).
 
+## En Mac
+
+Necesita una Mac con chip Apple (M1 o más nueva) y macOS 15 o más nuevo.
+
+1. Baja **Instalar Iconic Studio … (Mac).dmg** de la última versión en GitHub y ábrelo.
+2. Arrastra **Iconic Studio** a **Aplicaciones**.
+3. La primera vez, macOS dice que no puede comprobar la app (no está pagada la firma de Apple). Ve a
+   **Ajustes del Sistema → Privacidad y seguridad**, baja hasta el aviso de Iconic Studio y toca
+   **Abrir igualmente**. Solo se hace una vez.
+4. Al abrirse, prepara la carpeta **EditorDeVideo** en tu carpeta personal (el editor y tus videos van ahí).
+   Escribe tu nombre y toca **⚙️ Terminar de instalar**: se abre la Terminal, se instala Claude Code y Claude
+   termina de instalar el editor solo. Si pide la contraseña de tu Mac, escríbela ahí (no se ve mientras escribes).
+
+Lo de Claude se abre en ventanas de **Terminal** (en Windows son las ventanas negras). Las actualizaciones
+llegan igual, con el botón de la app.
+
 ## Lo que trae
 
 - **Primera vez**: pregunta tu nombre y, si el editor todavía no está instalado en la PC, el botón

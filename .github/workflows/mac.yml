@@ -1,0 +1,35 @@
+# La app de Mac: cada versión que publica construir/publicar.py dispara esto, que la compila en una Mac de GitHub
+# (construir/mac.sh) y sube «Instalar Iconic Studio <versión> (Mac).dmg» a esa misma versión. Tarda ~10 minutos.
+# También se puede correr a mano (Actions → App de Mac → Run workflow) para rehacer el .dmg de una versión.
+name: App de Mac
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Versión (por ejemplo v1.3.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    # la release «editor» (el editor que lleva adentro) no es una versión de la app
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
+    runs-on: macos-14
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # una versión nueva: sus archivos; a mano: la rama elegida (para rehacer el .dmg con un arreglo de mac.sh)
+          ref: ${{ github.event.release.tag_name || github.ref }}
+      - uses: astral-sh/setup-uv@v6
+      - name: Armar Iconic Studio.app y el .dmg
+        run: bash construir/mac.sh "$TAG"
+      - name: Subir el .dmg a la versión
+        run: gh release upload "$TAG" "build/Instalar Iconic Studio ${TAG#v} (Mac).dmg" --clobber

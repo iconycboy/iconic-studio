@@ -45,7 +45,7 @@ function renderInstallBanner() {
   b.innerHTML = !INST.editor
     ? `<div class="install warn-box">⚠️ <div><b>No encuentro el editor.</b> La carpeta <b>video-editor</b> tiene que estar junto a la carpeta de esta app.
         Vuelve a descomprimir el .zip completo.</div></div>`
-    : !INST.claude
+    : !INST.claude && !MAC  // en Mac «Terminar de instalar» instala también Claude Code
     ? `<div class="install warn-box">⚠️ <div><b>Falta Claude Code.</b> Vuelve a hacer doble clic en <b>INSTALAR</b> (en la carpeta del .zip): lo instala solo.</div></div>`
     : `<div class="install"><div class="install-icon">⚙️</div><div class="grow"><b>Falta un último paso: instalar el editor en esta PC</b>
         <div class="muted small">Se hace una sola vez y lo hace Claude solo (unos 10–20 minutos). Mientras, puedes dejarlo trabajando.</div></div>
@@ -59,7 +59,7 @@ async function startSetup() {
     <ol class="steps-list">
       <li>Si te pide <b>iniciar sesión</b>, elige tu cuenta de Claude (se abre el navegador; entra y acepta).</li>
       <li>Si pregunta si confías en la carpeta, elige <b>Yes</b> con <kbd>Enter</kbd>.</li>
-      <li>Si pide permiso para algo («Do you want to…»), elige <b>Yes</b>. Windows también puede preguntar «¿Quieres permitir que esta app haga cambios?»: toca <b>Sí</b> (a veces esa ventana queda detrás de las otras).</li>
+      <li>Si pide permiso para algo («Do you want to…»), elige <b>Yes</b>. ${MAC ? "Si pide la <b>contraseña de tu Mac</b>, escríbela ahí (no se ve nada mientras escribes, es normal) y presiona <kbd>Enter</kbd>." : "Windows también puede preguntar «¿Quieres permitir que esta app haga cambios?»: toca <b>Sí</b> (a veces esa ventana queda detrás de las otras)."}</li>
       <li>Si Claude te dice que <b>reinicies</b>: cierra la ventana negra y vuelve a tocar <b>«Terminar de instalar»</b> aquí. Sigue solo donde iba.</li>
     </ol>
     <p class="muted small">Cuando termine, este aviso desaparece solo.</p>

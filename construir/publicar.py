@@ -8,6 +8,10 @@ Pasos: sube APP_VERSION en app.py · compila «Iconic Studio.exe» (PyInstaller)
 original (+ los arreglos de construir/editor.json) · compila el instalador (Inno Setup) · arma estudio-app.zip
 (lo que baja el botón «Actualizar») y su .sha256 · commit + etiqueta + push · release en GitHub con los tres archivos.
 
+La app de Mac la compila GitHub solo (.github/workflows/mac.yml) unos 10 minutos después de publicar, y le agrega
+el .dmg a la misma release. El editor que lleva adentro lo baja de la release «editor» (video-editor.zip), que este
+script vuelve a subir solo cuando el editor cambió.
+
 Las apps ya instaladas ven la versión nueva al abrirse (revisan la última release del repositorio que dice
 actualizaciones.json). Con --requiere-instalador no se sube estudio-app.zip y la app manda a bajar el instalador.
 """
@@ -37,6 +41,40 @@ def run(*cmd, **kw):
 
 def out(*cmd) -> str:
     return subprocess.run([str(c) for c in cmd], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def editor_zip(cfg: dict, instalado: Path | None) -> Path:
+    """El editor para la app de Mac: el .zip original con los arreglos, con sus permisos (los .sh ejecutables)."""
+    dest = BUILD / "video-editor.zip"
+    with zipfile.ZipFile(cfg["zip"]) as src, zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
+        for info in src.infolist():
+            if not info.filename.startswith("video-editor/"):
+                continue
+            rel = info.filename[len("video-editor/"):]
+            data = src.read(info)
+            if instalado and rel in cfg.get("arreglos", []):
+                data = (instalado / rel).read_bytes()
+            z.writestr(info, data)
+    return dest
+
+
+def subir_editor(repo: str, pkg: Path) -> None:
+    """A la release «editor» (no es una versión: no la ven las apps), solo si cambió."""
+    sha = hashlib.sha256(pkg.read_bytes()).hexdigest()
+    try:
+        ahora = out("gh", "release", "download", "editor", "--repo", repo, "-p", "video-editor.zip.sha256", "-O", "-")
+    except subprocess.CalledProcessError:
+        ahora = None
+    if ahora and sha in ahora:
+        print("  el editor para Mac no cambió")
+        return
+    if ahora is None and subprocess.run(["gh", "release", "view", "editor", "--repo", repo], capture_output=True).returncode:
+        run("gh", "release", "create", "editor", "--repo", repo, "--title", "Editor (lo usa la app de Mac)",
+            "--notes", "El editor que la app de Mac copia la primera vez. No es una versión de la app.",
+            "--prerelease", "--latest=false")
+    sha_file = BUILD / "video-editor.zip.sha256"
+    sha_file.write_text(f"{sha}  video-editor.zip\n", encoding="utf-8")
+    run("gh", "release", "upload", "editor", "--repo", repo, "--clobber", pkg, sha_file)
 
 
 def main():
@@ -88,6 +126,9 @@ def main():
         else:
             print(f"  ⚠ no encuentro el editor instalado: {rel} va sin el arreglo")
 
+    print("▸ armando el editor para la app de Mac")
+    ed_zip = editor_zip(cfg, instalado)
+
     print("▸ compilando el instalador")
     iscc = next((p for p in ISCC if p.exists()), None) or sys.exit("falta Inno Setup (winget install JRSoftware.InnoSetup)")
     run(iscc, "/Q", f"/DMyVersion={a.version}", f"/DBuild={BUILD}", f"/O{BUILD}", ROOT / "construir" / "instalador.iss")
@@ -110,6 +151,8 @@ def main():
     if a.sin_subir:
         print("▸ listo, sin publicar:", *assets, sep="\n   ")
         return
+    print("▸ subiendo el editor para la app de Mac")
+    subir_editor(repo, ed_zip)
     print("▸ publicando en GitHub:", repo)
     run("git", "-C", ROOT, "add", "-A")
     run("git", "-C", ROOT, "commit", "-m", f"Versión {a.version}: {a.notas}")
@@ -118,6 +161,7 @@ def main():
     run("gh", "release", "create", f"v{a.version}", "--repo", repo, "--title", f"Iconic Studio {a.version}",
         "--notes", a.notas, *assets)
     print(f"✓ publicada la versión {a.version}: las apps instaladas la verán al abrirse")
+    print("  la de Mac (.dmg) la compila GitHub y aparece en la misma versión en unos 10 minutos")
 
 
 main()

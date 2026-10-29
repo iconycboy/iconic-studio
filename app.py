@@ -34,12 +34,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.2.1"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.3.0"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
 APP_PORT = 47821  # fijo a propósito: ver main()
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".m4v"}
+MAC = sys.platform == "darwin"
+if MAC:
+    # una app de Mac abierta desde el Finder no ve el PATH de la Terminal: sin esto no encuentra ffmpeg, uv ni claude
+    MAC_PATH = os.pathsep.join([str(Path.home() / ".local" / "bin"), "/opt/homebrew/bin", "/usr/local/bin"])
+    os.environ["PATH"] = MAC_PATH + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
 
 # Pasos en orden. "auto" = la app lo lanza sola al importar.
 STEPS = ["importar", "transcribir", "editar", "cortar", "audio", "subtitulos", "capcut", "exportar"]
@@ -62,7 +67,9 @@ def load_config() -> dict:
                 break
         else:
             cfg["editor"] = str(APP_DIR.parent / "video-editor")
-    cfg.setdefault("git_bash", r"C:\Program Files\Git\bin\bash.exe")
+    cfg.setdefault("git_bash", "/bin/bash" if MAC else r"C:\Program Files\Git\bin\bash.exe")
+    if MAC and not Path(cfg["git_bash"]).exists():
+        cfg["git_bash"] = "/bin/bash"
     cfg.setdefault("idioma", "es")
     cfg.setdefault("usuario", "")  # la app lo pregunta la primera vez
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -87,6 +94,8 @@ def to_posix(p: Path | str) -> str:
 
 def bash_tmp() -> Path:
     """El /tmp de Git Bash como ruta de Windows (splice.sh lee /tmp/video-editor/<job>/cuts.json)."""
+    if os.name != "nt":
+        return Path("/tmp")
     out = subprocess.run([BASH, "-c", "cygpath -w /tmp"], capture_output=True, text=True,
                          creationflags=NO_WINDOW)
     return Path(out.stdout.strip())
@@ -560,6 +569,15 @@ def delete_project(job: str) -> dict:
         raise ValueError("ese video ya no existe")
     if TASK.running and TASK.job == job:
         raise RuntimeError("este video está trabajando ahora; espera a que termine para borrarlo")
+    if MAC:  # a la Papelera con el Finder (se puede sacar de ahí mientras no se vacíe)
+        out = subprocess.run(["osascript", "-e", "on run argv", "-e",
+                              'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)',
+                              "-e", "end run", str(d)], capture_output=True, text=True, timeout=300)
+        if d.exists():
+            raise RuntimeError("no se pudo mandar a la Papelera (no se borró nada). " + out.stderr.strip()[-200:])
+        if TASK.job == job:
+            TASK.job = TASK.step = None
+        return {"ok": True}
     out = subprocess.run([BASH, "-lc", f"bash workflows/recycle-bin.sh '{to_posix(d)}' --apply"], cwd=EDITOR,
                          capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW,
                          timeout=300)
@@ -878,7 +896,8 @@ def write_cuts(t: Task, work: Path, cuts: dict) -> int:
 def capcut_ready(t: Task) -> int:
     """CapCut guarda su lista de proyectos en root_meta_info.json, que solo crea con el primer proyecto local.
     Sin ella el puente no puede registrar el proyecto nuevo, y escribirla a ciegas podría romper la lista."""
-    user_data = Path(os.environ.get("LOCALAPPDATA", "")) / "CapCut" / "User Data"
+    user_data = (Path.home() / "Movies" / "CapCut" / "User Data" if MAC
+                 else Path(os.environ.get("LOCALAPPDATA", "")) / "CapCut" / "User Data")
     root = user_data / "Projects" / "com.lveditor.draft"
     gs = user_data / "Config" / "globalSetting"
     if gs.exists():
@@ -886,10 +905,10 @@ def capcut_ready(t: Task) -> int:
         if m and m.group(1).strip():
             root = Path(m.group(1).strip().replace("\\\\", "\\"))
     if not user_data.exists():
-        t.say("✗ No encuentro CapCut instalado en esta PC.")
+        t.say(f"✗ No encuentro CapCut instalado en esta {'Mac' if MAC else 'PC'}.")
         return 1
     if not (root / "root_meta_info.json").exists():
-        t.say("✗ CapCut todavía no tiene ningún proyecto guardado en esta PC, y lo necesita para registrar el nuevo.")
+        t.say(f"✗ CapCut todavía no tiene ningún proyecto guardado en esta {'Mac' if MAC else 'PC'}, y lo necesita para registrar el nuevo.")
         t.say("  Abre CapCut, haz clic en «Crear proyecto», ciérralo (cierra CapCut por completo) y vuelve a")
         t.say("  presionar «Enviar a CapCut». Solo hace falta una vez.")
         return 1
@@ -1002,7 +1021,7 @@ def open_setup() -> None:
         "si no tengo ninguna app de edición instalada, la respuesta es chat-only. "
         "Si hace falta reiniciar Claude Code, dime que cierre esta ventana negra y vuelva a tocar «Terminar de instalar» "
         "en la app (eso lo abre de nuevo). Al final dime en una frase que ya quedó y que vuelva a la app."), encoding="utf-8")
-    launch_claude("instalar el editor", pf)
+    launch_claude("instalar el editor", pf, instalar=True)
 
 
 # --------------------------------------------------------------------------- actualizaciones
@@ -1043,7 +1062,8 @@ def check_update(force: bool = False) -> dict:
     except Exception as e:  # noqa: BLE001 (sin internet, o todavía sin versiones publicadas)
         return {**out, "error": str(e)[:200]}
     assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets", [])}
-    installer = next((u for n, u in assets.items() if n.lower().endswith(".exe")), rel.get("html_url", ""))
+    ext = ".dmg" if MAC else ".exe"  # el instalador de este sistema
+    installer = next((u for n, u in assets.items() if n.lower().endswith(ext)), rel.get("html_url", ""))
     data = {"nueva": _vtuple(rel.get("tag_name", "")) > _vtuple(APP_VERSION), "ultima": rel.get("tag_name", "").lstrip("v"),
             "notas": (rel.get("body") or "").strip()[:3000], "zip": assets.get(UPDATE_ASSET, ""),
             "sha": assets.get(UPDATE_ASSET + ".sha256", ""), "instalador": installer, "pagina": rel.get("html_url", "")}
@@ -1096,7 +1116,12 @@ def _restart() -> None:
     """Vuelve a abrir la app (el .exe, o app.py con el mismo Python) y cierra esta."""
     time.sleep(1.5)
     cmd = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(APP_DIR / "app.py")]
-    if "--serve" not in sys.argv:
+    bundle = Path(sys.executable).resolve().parents[2] if MAC else None
+    if "--serve" in sys.argv:
+        pass
+    elif bundle and bundle.suffix == ".app":  # la app de Mac se vuelve a abrir entera, con su ícono en el Dock
+        subprocess.Popen(["open", "-n", str(bundle)])
+    else:
         subprocess.Popen(cmd, cwd=APP_DIR, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
     os._exit(0)
 
@@ -1107,11 +1132,38 @@ def find_claude() -> str | None:
     if found:
         return found
     home = Path.home()
-    for c in [home / ".local" / "bin" / "claude.exe",
+    for c in [home / ".local" / "bin" / "claude", Path("/opt/homebrew/bin/claude"), Path("/usr/local/bin/claude"),
+              home / ".local" / "bin" / "claude.exe",
               *(home / "AppData" / "Local" / "Microsoft" / "WinGet" / "Packages").glob("Anthropic.ClaudeCode*/claude.exe")]:
         if c.exists():
             return str(c)
     return None
+
+
+CLAUDE_FALTA = ("no encuentro Claude Code instalado: en la pantalla de inicio toca «Terminar de instalar» y se instala solo"
+                if MAC else "no encuentro Claude Code instalado (instálalo con: winget install Anthropic.ClaudeCode)")
+
+
+def open_terminal(titulo: str, cmds: list[str], env_extra: dict | None = None) -> None:
+    """Mac: una ventana de Terminal (lo que en Windows es la ventana negra) que corre estos comandos en la carpeta
+    del editor. Se arma un .command y se abre con Terminal, que no pide permisos para eso."""
+    import shlex
+    d = APP_DIR / "cache" / "terminal"
+    d.mkdir(parents=True, exist_ok=True)
+    for old in d.glob("*.command"):  # los de días anteriores ya no sirven
+        if old.stat().st_mtime < time.time() - 86400:
+            old.unlink(missing_ok=True)
+    f = d / f"{int(time.time() * 1000)}.command"
+    f.write_text("\n".join([
+        "#!/bin/bash",
+        f"printf '\\033]0;%s\\007' {shlex.quote(titulo)}",
+        f'export PATH="{MAC_PATH}:$PATH"',
+        *(f"export {k}={shlex.quote(str(v))}" for k, v in (env_extra or {}).items()),
+        f"cd {shlex.quote(str(EDITOR))}",
+        "clear",
+        *cmds, ""]), encoding="utf-8")
+    f.chmod(0o755)
+    subprocess.Popen(["open", "-a", "Terminal", str(f)])
 
 
 STEP_NAMES = {"importar": "Importar", "transcribir": "Transcribir", "editar": "Editar por texto",
@@ -1218,11 +1270,22 @@ def open_claude(job: str, modo: str = "libre", texto: str = "") -> None:
 MODELOS = {"sonnet": "sonnet", "opus": "opus"}  # alias de Claude Code: siempre el último de cada uno
 
 
-def launch_claude(titulo: str, pf: Path, modelo: str = "", env_extra: dict | None = None) -> None:
+def launch_claude(titulo: str, pf: Path, modelo: str = "", env_extra: dict | None = None, instalar: bool = False) -> None:
     exe = find_claude()
-    if not exe:
-        raise RuntimeError("no encuentro Claude Code instalado (instálalo con: winget install Anthropic.ClaudeCode)")
     model = f"--model {MODELOS[modelo]} " if modelo in MODELOS else ""
+    if MAC:
+        import shlex
+        pre = []
+        if not exe and instalar:  # el instalador oficial de Claude Code (queda en ~/.local/bin)
+            pre = ["echo 'Instalando Claude Code (un par de minutos)…'", "curl -fsSL https://claude.ai/install.sh | bash",
+                   "echo"]
+        elif not exe:
+            raise RuntimeError(CLAUDE_FALTA)
+        open_terminal(f"Claude · {titulo}", [*pre, f'{shlex.quote(exe or "claude")} {model}--permission-mode acceptEdits '
+                                                  f'"$(cat {shlex.quote(str(pf))})"'], env_extra)
+        return
+    if not exe:
+        raise RuntimeError(CLAUDE_FALTA)
     ps = (f"$Host.UI.RawUI.WindowTitle = 'Claude · {titulo.replace(chr(39), '')}'; "
           "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
           f"Set-Location -LiteralPath '{EDITOR}'; "
@@ -1473,6 +1536,11 @@ def style_info(gid: str) -> dict:
 
 def notify(titulo: str, texto: str) -> None:
     """Una notificación de Windows (la de la esquina), sin instalar nada."""
+    if MAC:
+        subprocess.Popen(["osascript", "-e", "on run argv", "-e",
+                          "display notification (item 2 of argv) with title (item 1 of argv)", "-e", "end run",
+                          titulo, texto])
+        return
     esc = lambda s: s.replace("&", "&amp;").replace("<", "&lt;").replace("'", "&apos;")  # noqa: E731
     ps = ("[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; "
           "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null; "
@@ -1506,7 +1574,7 @@ def claude_env() -> dict:
 def _claude_auth(*args: str, timeout: int = 40) -> subprocess.CompletedProcess:
     exe = find_claude()
     if not exe:
-        raise RuntimeError("no encuentro Claude Code instalado (instálalo con: winget install Anthropic.ClaudeCode)")
+        raise RuntimeError(CLAUDE_FALTA)
     return subprocess.run([exe, "auth", *args], env=claude_env(), cwd=EDITOR, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=timeout, creationflags=NO_WINDOW)
 
@@ -1533,8 +1601,15 @@ def account_login(email: str = "") -> None:
     """Abre una ventana con el inicio de sesión de Claude (se completa en el navegador)."""
     exe = find_claude()
     if not exe:
-        raise RuntimeError("no encuentro Claude Code instalado (instálalo con: winget install Anthropic.ClaudeCode)")
+        raise RuntimeError(CLAUDE_FALTA)
     email = re.sub(r"[^\w.@+-]", "", email)[:120]
+    if MAC:
+        import shlex
+        open_terminal("Claude · iniciar sesión", [
+            "echo 'Se va a abrir el navegador: entra con TU cuenta de Claude y acepta.'",
+            f"{shlex.quote(exe)} auth login --claudeai{f' --email {email}' if email else ''}",
+            "echo; echo 'Listo. Ya puedes cerrar esta ventana.'"])
+        return
     ps = ("$Host.UI.RawUI.WindowTitle = 'Claude · iniciar sesión'; [Console]::OutputEncoding = [Text.Encoding]::UTF8; "
           "Write-Host 'Se va a abrir el navegador: entra con TU cuenta de Claude y acepta.' -ForegroundColor Cyan; "
           f"& '{exe}' auth login --claudeai{f' --email {email}' if email else ''}; "
@@ -1542,6 +1617,21 @@ def account_login(email: str = "") -> None:
           "Start-Sleep -Seconds 8")
     subprocess.Popen(["powershell.exe", "-NoProfile", "-Command", ps], cwd=EDITOR, env=claude_env(),
                      creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+
+
+def open_path(p: Path) -> None:
+    if MAC:
+        subprocess.Popen(["open", str(p)])
+    else:
+        os.startfile(str(p))  # noqa: S606
+
+
+def reveal(p: Path) -> None:
+    """El archivo marcado en su carpeta."""
+    if MAC:
+        subprocess.Popen(["open", "-R", str(p)])
+    else:
+        subprocess.Popen(["explorer.exe", f"/select,{p}"])
 
 
 def probe_clip(path: Path) -> dict:
@@ -1782,7 +1872,7 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("abrir"):
                 d = assets_dir(scope, ident)
                 d.mkdir(parents=True, exist_ok=True)
-                os.startfile(str(d))  # noqa: S606
+                open_path(d)
                 return self._json({"ok": True})
             if body.get("agregar"):
                 return self._json({"assets": add_asset_files(scope, ident, [str(s) for s in body["agregar"]])})
@@ -1870,13 +1960,13 @@ class Handler(BaseHTTPRequestHandler):
                 final = d / "outputs" / f"{job}.final.mp4"
                 target = final if final.exists() else raw_clip(job)
                 if target:
-                    subprocess.Popen(["explorer.exe", f"/select,{target}"])
+                    reveal(target)
                 else:
-                    os.startfile(str(d))  # noqa: S606
+                    open_path(d)
                 return self._json({"ok": True})
             if action == "open":
                 target = job_dir(job) / (body.get("sub") or "")
-                os.startfile(str(target))  # noqa: S606
+                open_path(target)
                 return self._json({"ok": True})
         self._json({"error": "ruta desconocida"}, 404)
 
@@ -1928,7 +2018,7 @@ def refresh_shortcut_icons() -> None:
     icono.ico. El .exe trae su ícono adentro y una actualización de un clic no lo cambia; icono.ico sí llega con cada
     versión, así que el ícono nuevo se ve también en las PCs que actualizan con el botón. Si cambió alguno, se le pide
     a Windows que repinte los íconos (si no, sigue mostrando el viejo de su memoria hasta reiniciar)."""
-    if not getattr(sys, "frozen", False) or not (APP_DIR / "icono.ico").exists():
+    if os.name != "nt" or not getattr(sys, "frozen", False) or not (APP_DIR / "icono.ico").exists():
         return
     ico = f"{APP_DIR / 'icono.ico'},0"
     ps = ("$sh = New-Object -ComObject WScript.Shell; $n = 0; "
@@ -1983,7 +2073,7 @@ def set_window_icon() -> None:
 class ExclusiveServer(ThreadingHTTPServer):
     """Sin compartir el puerto: en Windows, SO_REUSEADDR (lo que usa http.server) deja que dos programas tomen el
     mismo puerto y el segundo le roba las conexiones al primero. Así, si ya está tomado, falla y se usa otro."""
-    allow_reuse_address = False
+    allow_reuse_address = os.name != "nt"  # en Mac/Linux SO_REUSEADDR no deja compartirlo, y sin él no reabre enseguida
 
     def server_bind(self):
         import socket
