@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.2.0"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.2.1"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
@@ -1924,21 +1924,60 @@ def bind_drop(window) -> None:
 
 
 def refresh_shortcut_icons() -> None:
-    """Los accesos directos del .exe (escritorio y menú Inicio) con el ícono de icono.ico. El .exe trae su ícono
-    adentro y una actualización de un clic no lo cambia; icono.ico sí llega con cada versión, así que el ícono nuevo
-    se ve también en las PCs que actualizan con el botón."""
+    """Los accesos directos del .exe (escritorio, menú Inicio y el anclado a la barra de tareas) con el ícono de
+    icono.ico. El .exe trae su ícono adentro y una actualización de un clic no lo cambia; icono.ico sí llega con cada
+    versión, así que el ícono nuevo se ve también en las PCs que actualizan con el botón. Si cambió alguno, se le pide
+    a Windows que repinte los íconos (si no, sigue mostrando el viejo de su memoria hasta reiniciar)."""
     if not getattr(sys, "frozen", False) or not (APP_DIR / "icono.ico").exists():
         return
-    ps = ("$sh = New-Object -ComObject WScript.Shell; "
-          "$dirs = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs')); "
+    ico = f"{APP_DIR / 'icono.ico'},0"
+    ps = ("$sh = New-Object -ComObject WScript.Shell; $n = 0; "
+          "$dirs = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'), "
+          r"(Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar')); "
           "foreach ($d in $dirs) { Get-ChildItem -LiteralPath $d -Filter '*.lnk' -Recurse -Depth 1 -ErrorAction SilentlyContinue | "
           "ForEach-Object { $l = $sh.CreateShortcut($_.FullName); "
-          f"if ($l.TargetPath -eq '{sys.executable}' -and $l.IconLocation -ne '{APP_DIR / 'icono.ico'},0') "
-          f"{{ $l.IconLocation = '{APP_DIR / 'icono.ico'},0'; $l.Save() }} }} }}")
+          f"if ($l.TargetPath -eq '{sys.executable}' -and $l.IconLocation -ne '{ico}') "
+          f"{{ $l.IconLocation = '{ico}'; $l.Save(); $n++ }} }} }}; "
+          "if ($n -gt 0) { & ie4uinit.exe -show }")
     try:
         subprocess.Popen(["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps], creationflags=NO_WINDOW)
     except OSError:
         pass
+
+
+def set_window_icon() -> None:
+    """El ícono de la ventana abierta y de su botón en la barra de tareas, desde icono.ico: así el ícono nuevo se ve
+    ahí aunque el .exe traiga el viejo adentro (y también al abrir la app con uv, que mostraría el de Python).
+    Solo las ventanas de ESTE proceso: si la app está abierta dos veces, cada una cambia la suya."""
+    ico = APP_DIR / "icono.ico"
+    if os.name != "nt" or not ico.exists():
+        return
+    import ctypes
+    from ctypes import wintypes
+    u = ctypes.windll.user32
+    u.LoadImageW.restype = ctypes.c_void_p
+    u.SendMessageW.argtypes = [wintypes.HWND, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+    mine = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(hwnd, _):
+        pid = wintypes.DWORD()
+        u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == os.getpid() and u.IsWindowVisible(hwnd) and u.GetWindowTextLengthW(hwnd):
+            mine.append(hwnd)
+        return True
+
+    for _ in range(40):  # la ventana tarda un poco en existir
+        mine.clear()
+        u.EnumWindows(each, 0)
+        if mine:
+            for hwnd in mine:
+                for kind, size in ((1, 256), (0, 32)):  # ICON_BIG, ICON_SMALL
+                    h = u.LoadImageW(None, str(ico), 1, size, size, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
+                    if h:
+                        u.SendMessageW(hwnd, 0x80, kind, h)  # WM_SETICON
+            return
+        time.sleep(0.25)
 
 
 class ExclusiveServer(ThreadingHTTPServer):
@@ -1990,6 +2029,7 @@ def main():
     api._window = webview.create_window("Iconic Studio", url, js_api=api, width=1440, height=900,
                                        min_size=(1100, 700), background_color="#0f1115")
     api._window.events.loaded += lambda: bind_drop(api._window)
+    api._window.events.shown += lambda: threading.Thread(target=set_window_icon, daemon=True).start()
     # sin modo privado (el de pywebview por defecto): así recuerda el recorrido visto, los colores elegidos, etc.
     webview.start(private_mode=False, storage_path=str(APP_DIR / "cache" / "webview"))
 
