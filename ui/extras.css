@@ -1,0 +1,51 @@
+/* Iconic Studio — lotes, avance de Claude, comentarios, material propio y estilo de carpeta */
+.lote-opts { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.opt { display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; cursor: pointer; background: var(--bg); }
+.opt input { display: none; }
+.opt.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+
+#queue-card:empty { display: none; }
+.queue { background: var(--bg2); border: 1px solid var(--accent); border-radius: 14px; padding: 12px 16px; margin-bottom: 18px; }
+.queue.terminado { border-color: var(--ok); }
+.qlist { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; max-height: 260px; overflow-y: auto; }
+.qitem { display: flex; gap: 10px; align-items: center; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.qitem.editando { border-color: var(--accent); }
+.qitem.listo { opacity: .75; }
+.qbar { height: 6px; background: var(--bg3); border-radius: 99px; overflow: hidden; min-width: 80px; flex: 0 0 120px; }
+.qbar > div { height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s; }
+#card-avance:empty { display: none; }
+#card-avance h3 { margin: 0; display: flex; gap: 8px; align-items: center; }
+#card-avance .qbar { flex: none; width: 100%; margin: 8px 0; }
+.steps-mini { display: flex; flex-wrap: wrap; gap: 4px; }
+.sm { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: var(--bg3); color: var(--muted); }
+.sm.hecho { background: color-mix(in srgb, var(--ok) 18%, var(--bg3)); color: var(--text); }
+.sm.trabajando { background: color-mix(in srgb, var(--accent) 25%, var(--bg3)); color: var(--text); }
+.sm.esperando { background: color-mix(in srgb, var(--warn) 20%, var(--bg3)); color: var(--text); }
+
+.cm-card { width: min(980px, calc(100vw - 32px)); }
+.cm-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; align-items: start; }
+.cm-wrap video { width: 100%; max-height: 64vh; background: #000; border-radius: 10px; }
+.cm-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cm-list { display: flex; flex-direction: column; gap: 6px; max-height: 52vh; overflow-y: auto; }
+.cm-item { display: flex; gap: 6px; align-items: flex-start; }
+.cm-item textarea { flex: 1; resize: vertical; min-width: 0; }
+.cm-time { cursor: pointer; border: none; white-space: nowrap; margin-top: 4px; }
+.cm-cta { margin-top: 8px; flex-wrap: wrap; }
+@media (max-width: 1200px) { .cm-wrap { grid-template-columns: 1fr; } .cm-wrap video { max-height: 40vh; } }
+
+.mat-card { width: min(860px, calc(100vw - 32px)); }
+.tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin: 4px 0 8px; }
+.tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted); padding: 8px 12px; font: inherit; cursor: pointer; }
+.tab.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.mat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; max-height: 50vh; overflow-y: auto; }
+.mat-item { display: flex; gap: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+.mat-thumb { width: 64px; height: 64px; flex: none; border-radius: 8px; background: var(--bg3); display: grid; place-items: center; overflow: hidden; }
+.mat-thumb img, .mat-thumb video { width: 100%; height: 100%; object-fit: cover; }
+.mat-grid.sonidos .mat-item { flex-direction: column; }
+.mat-grid.sonidos .mat-thumb { width: 100%; height: auto; background: none; }
+.mat-grid.sonidos audio { width: 100%; height: 32px; }
+.mat-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.mat-body input { width: 100%; box-sizing: border-box; }
+.mat-body .btn { padding: 2px 8px; }
+.ok-box { background: color-mix(in srgb, var(--ok) 14%, var(--bg3)); border-radius: 10px; padding: 10px 12px; }

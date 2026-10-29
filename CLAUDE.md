@@ -8,7 +8,7 @@ la carpeta de al lado. Habla con el usuario en español sencillo.
 - `app.py` — servidor local + ventana. `APP_VERSION` arriba. Se corre con `uv run app.py` (o el .exe instalado).
   Pruebas: `uv run app.py --serve 8765` y abrir http://127.0.0.1:8765/.
 - `ui/` — `index.html`, `style.css`, `app.js` son la base; cada archivo encima (`tema.js`, `assets.js`, `lote.js`,
-  `instrucciones.js`, `menu.js`, `cuenta.js`, `carpetas.js`, `bienvenida.js`, `arrastrar.js`, `actualizar.js`)
+  `instrucciones.js`, `menu.js`, `cuenta.js`, `carpetas.js`, `bienvenida.js`, `arrastrar.js`, `actualizar.js`, `cola.js` (lotes en fila, modo Rápido/Completo, modelo, avance de Claude desde RUN.md, estilo de carpeta), `comentar.js`, `material.js`)
   agrega una función envolviendo las de antes, y se cargan en ese orden.
 - `construir/` — `lanzador.py` (el .exe de PyInstaller: Python + pywebview, que corre el `app.py` suelto de al lado),
   `instalador.iss` (Inno Setup), `publicar.py`, `editor.json` (local, ver `editor.ejemplo.json`).

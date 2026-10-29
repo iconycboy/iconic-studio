@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.0.1"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.1.0"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
@@ -283,7 +283,12 @@ def list_projects() -> list[dict]:
     return items
 
 
-GROUPS_FILE = APP_DIR / "grupos.json"
+# las carpetas viven junto a los videos (en el editor), no en la app: así cualquier copia de la app las ve igual
+GROUPS_FILE = PROJECTS / "_grupos" / "grupos.json"
+_OLD_GROUPS = APP_DIR / "grupos.json"  # donde estaban hasta la 1.0.1
+if not GROUPS_FILE.exists() and _OLD_GROUPS.exists() and PROJECTS.exists():
+    GROUPS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(_OLD_GROUPS, GROUPS_FILE)
 
 
 def read_groups() -> list[dict]:
@@ -300,7 +305,10 @@ ASSET_KIND = {**{e: "video" for e in VIDEO_EXT},
               **{e: "imagen" for e in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".heic")},
               **{e: "audio" for e in (".mp3", ".wav", ".m4a", ".aac", ".ogg")},
               **{e: "fuente" for e in (".ttf", ".otf")}, ".pdf": "documento"}
-ASSET_SCOPES = ("video", "grupo")
+ASSET_SCOPES = ("video", "grupo", "material")
+# material propio: imágenes y sonidos ya hechos que Claude usa en vez de generarlos (opcional), para todos los videos
+MATERIAL = {"imagenes": {"imagen", "video"}, "sonidos": {"audio"}}
+STYLE_FILE = "ESTILO.md"  # el estilo aprendido de una carpeta (lo escribe Claude)
 
 
 def assets_dir(scope: str, ident: str) -> Path:
@@ -308,6 +316,8 @@ def assets_dir(scope: str, ident: str) -> Path:
         return job_dir(ident) / "assets" / "mis-assets"
     if scope == "grupo" and re.fullmatch(r"[a-z0-9-]{1,60}", ident):
         return PROJECTS / "_grupos" / ident
+    if scope == "material" and ident in MATERIAL:
+        return PROJECTS / "_material" / ident
     raise ValueError("assets no válidos")
 
 
@@ -340,7 +350,7 @@ def save_assets(scope: str, ident: str, items: list[dict]) -> list[dict]:
             item["archivo"] = name
             item["nombre"] = str(a.get("nombre") or name)[:120]
         clean.append(item)
-    keep = {a["archivo"] for a in clean if "archivo" in a} | {"assets.json", "ASSETS.md", "instrucciones.md"}
+    keep = {a["archivo"] for a in clean if "archivo" in a} | {"assets.json", "ASSETS.md", "instrucciones.md", STYLE_FILE}
     for f in d.iterdir():
         if f.is_file() and f.name not in keep:
             f.unlink()  # es la copia de la app; el archivo original sigue donde estaba
@@ -360,11 +370,13 @@ def add_asset_files(scope: str, ident: str, sources: list[str]) -> list[dict]:
         kind = ASSET_KIND.get(s.suffix.lower())
         if not kind:
             raise ValueError(f"«{s.name}» no es una foto, video, audio, tipografía o PDF")
+        if scope == "material" and kind not in MATERIAL[ident]:
+            raise ValueError(f"«{s.name}» no va aquí: " + ("solo imágenes (o videos cortos)" if ident == "imagenes" else "solo sonidos"))
         name, n = re.sub(r"[^A-Za-z0-9._-]+", "_", s.stem)[:50] + s.suffix.lower(), 2
         while (d / name).exists():
             name, n = f"{re.sub(r'[^A-Za-z0-9._-]+', '_', s.stem)[:50]}-{n}{s.suffix.lower()}", n + 1
         shutil.copy2(s, d / name)  # copiar, nunca mover
-        items.append({"tipo": kind, "archivo": name, "nombre": s.name, "uso": "", "obligatorio": True})
+        items.append({"tipo": kind, "archivo": name, "nombre": s.name, "uso": "", "obligatorio": scope != "material"})
     return save_assets(scope, ident, items)
 
 
@@ -379,6 +391,13 @@ def assets_lines(scope: str, ident: str, items: list[dict]) -> list[str]:
 
 
 def assets_md(scope: str, ident: str, items: list[dict]) -> str:
+    if scope == "material":
+        rel = assets_dir(scope, ident).relative_to(EDITOR).as_posix()
+        kind = "imágenes" if ident == "imagenes" else "sonidos"
+        lines = [f"- {rel}/{a['archivo']}: {a.get('uso') or a.get('nombre') or '(sin descripción)'}" for a in items]
+        return (f"# Material propio de {USUARIO}: {kind}\n\n"
+                "Ya hecho, para usar EN VEZ de generarlo o buscarlo (opcional: solo lo que encaje). Cada uno con lo que es:\n\n"
+                + "\n".join(lines) + "\n")
     title = f"grupo «{group_name(ident)}» (valen para todos sus videos)" if scope == "grupo" else f"el video {ident}"
     instr = read_instr(scope, ident)
     return (f"# Assets de {title}\n\nLos eligió {USUARIO} en la app Iconic Studio. "
@@ -921,7 +940,20 @@ APP_RULES = [
     "se siguen al pie de la letra en cada edición de esos videos, y mandan sobre los presets bloqueados: si pide resaltar "
     "una palabra en los subtítulos, otro color, un logo cada vez que dice algo, etc., se hace aunque el preset diga otra "
     "cosa. Si algo de verdad no se puede, díselo antes de empezar y propón lo más parecido.",
+    "[app] Si la app pide MODO RÁPIDO para un video o un lote, se hace solo corte, audio, subtítulos (y gancho si el preset lo "
+    "lleva) y exportar, sin gráficos elaborados ni efectos de sonido salvo los assets obligatorios, y sin las revisiones con "
+    "subagentes: lo pide {n} para editar muchos videos gastando menos, y manda sobre los pasos de siempre.",
+    "[app] {n} puede guardar material propio ya hecho en `projects/_material/imagenes/` y `projects/_material/sonidos/` "
+    "(cada carpeta con su `ASSETS.md`, que dice qué es cada archivo): antes de generar una ilustración o buscar un efecto de "
+    "sonido, mira ahí y usa lo que encaje. Es opcional: lo que no haya, se hace como siempre.",
+    "[app] Cada carpeta (campaña) puede tener su estilo aprendido en `projects/_grupos/<carpeta>/ESTILO.md`, con piezas "
+    "listas en su `plantilla/`: al editar un video de esa carpeta, léelo antes de planear y síguelo, reutilizando lo ya "
+    "aprobado en vez de decidirlo de nuevo.",
 ]
+
+
+APP_RULE_MARKS = ["háblale siempre en español", "chat-only", "projects/<job>/studio/", "bake-preset", "OBLIGATORIO",
+                  "instrucciones previas", "MODO RÁPIDO", "projects/_material/", "ESTILO.md"]
 
 
 def ensure_app_rules() -> None:
@@ -929,9 +961,11 @@ def ensure_app_rules() -> None:
     if not USUARIO or not (EDITOR / "CLAUDE.md").exists():
         return
     rules = read_rules()
-    if any(r.startswith("[app]") for r in rules):
-        return
-    write_rules(rules + [r.format(n=USUARIO, app=APP_DIR) for r in APP_RULES])
+    mine = [r for r in rules if r.startswith("[app]")]
+    # cada regla se reconoce por una marca suya: así una versión nueva agrega solo las que falten, sin duplicar
+    missing = [r for r, mark in zip(APP_RULES, APP_RULE_MARKS) if not any(mark in x for x in mine)]
+    if missing:
+        write_rules(rules + [r.format(n=USUARIO, app=APP_DIR) for r in missing])
 
 
 def set_usuario(nombre: str) -> None:
@@ -1085,6 +1119,37 @@ STEP_NAMES = {"importar": "Importar", "transcribir": "Transcribir", "editar": "E
               "capcut": "Enviar a CapCut", "exportar": "Exportar MP4"}
 
 
+def style_for_claude(jobs: list[str]) -> str:
+    """El estilo aprendido de la carpeta de estos videos (ESTILO.md): seguirlo ahorra planear desde cero."""
+    out = []
+    for g in dict.fromkeys(state_of(j).get("grupo", "") for j in jobs):
+        f = PROJECTS / "_grupos" / g / STYLE_FILE if g else None
+        if f and f.exists():
+            out.append(f"ESTILO APRENDIDO de la carpeta «{group_name(g)}»: lee projects/_grupos/{g}/{STYLE_FILE} ANTES de "
+                       "planear y síguelo: es la receta que {u} ya aprobó para esta campaña (formato, subtítulos, gráficos, "
+                       "sonidos, ritmo). Reutiliza las piezas que señala (scripts, comps, plantillas) en vez de inventarlas "
+                       "de nuevo; cambia solo lo que el contenido de este video pida.".replace("{u}", USUARIO))
+    return "\n".join(out) + ("\n" if out else "")
+
+
+def material_for_claude() -> str:
+    have = [k for k in MATERIAL if read_assets("material", k)]
+    if not have:
+        return ""
+    return (f"MATERIAL PROPIO de {USUARIO} (opcional): antes de generar ilustraciones o buscar sonidos, mira "
+            + " y ".join(f"projects/_material/{k}/ASSETS.md" for k in have)
+            + " y usa lo que encaje con lo que se dice; lo que no haya ahí, lo haces como siempre.\n")
+
+
+MODO_RAPIDO = (
+    "MODO RÁPIDO (pedido por {u} para editar muchos videos gastando poco): haz el corte (paso 2), el audio (3), los "
+    "subtítulos del preset y el gancho si el preset lo lleva, y exporta (8). NO hagas gráficos elaborados, ilustraciones "
+    "ni efectos de sonido, salvo los assets OBLIGATORIOS (ponlos de la forma más simple que cumpla su nota). Salta las "
+    "revisiones con subagentes (la segunda pasada de ojos frescos del paso 2 y la ronda de edit-review del paso 5): "
+    "revisa tú mismo, rápido. Si la carpeta tiene ESTILO.md, aplica de él solo lo que entre en este modo. "
+    "Anota en RUN.md «modo rápido» y lo que se saltó.\n")
+
+
 def _plain(text: str) -> str:
     """Sin comillas dobles: PowerShell 5.1 las rompe al pasar el texto a Claude Code."""
     return text.replace('"', "”")
@@ -1111,6 +1176,9 @@ def claude_prompt(job: str, modo: str, texto: str) -> str:
     instr = instr_for_claude([job])
     if instr:
         ctx += instr + "\n"
+    more = style_for_claude([job]) + material_for_claude()
+    if more:
+        ctx += more + "\n"
     if modo == "auto":
         return ctx + (
             "PEDIDO: edita este video completo, de principio a fin, con el flujo edit-video (los 8 pasos), "
@@ -1125,7 +1193,7 @@ def claude_prompt(job: str, modo: str, texto: str) -> str:
             f"COMENTARIOS DE {USUARIO.upper()} sobre este video:\n«{texto.strip()}»\n\n"
             "PEDIDO: aplica estos cambios al video (como cambios del paso 7, dentro de este chat) y vuelve a exportar si ya "
             "estaba exportado. Después, guarda lo que vale para videos futuros con bake-preset: lo general en my-rules.md y "
-            "lo de este tipo de video en su preset. Dile en palabras simples qué cambiaste y qué aprendiste."
+            "lo de este tipo de video en su preset; si el video está en una carpeta con ESTILO.md (projects/_grupos/<carpeta>/), actualízalo con lo que valga para toda la campaña. Dile en palabras simples qué cambiaste y qué aprendiste."
         )
     if modo == "ayuda":
         log = studio_dir(job) / "logs" / f"{texto}.log"
@@ -1147,79 +1215,277 @@ def open_claude(job: str, modo: str = "libre", texto: str = "") -> None:
     launch_claude(state_of(job)["titulo"], pf)
 
 
-def batch_prompt(jobs: list[str], extra: str = "") -> str:
-    """Un lote: varios videos que Claude edita en una sola ventana y entrega juntos."""
-    n = len(jobs)
-    blocks = []
-    for i, job in enumerate(jobs, 1):
-        st = state_of(job)
-        pasos = step_status(job)
-        hechos = [STEP_NAMES[s] for s in STEPS if pasos[s] == "hecho"]
-        ps = [p.name for p in partes(job)]
-        grupo = f", grupo «{group_name(st['grupo'])}»" if st.get("grupo") else ""
-        blocks.append(
-            f"{i}. projects/{job} («{st['titulo']}», "
-            f"{ps[0] if len(ps) == 1 else f'{len(ps)} partes en este orden: ' + ', '.join(ps)}, "
-            f"idioma {st['idioma']}{grupo}). Ya hecho en la app: {', '.join(hechos) or 'nada'}. "
-            f"Notas: {st['notas'] or '(ninguna)'}.")
-    kits = []
-    for g in dict.fromkeys(state_of(j).get("grupo", "") for j in jobs):
-        items = read_assets("grupo", g) if g else []
-        if items:
-            kits.append(f"De su grupo «{group_name(g)}» (para TODOS los videos de ese grupo):\n"
-                        + "\n".join(assets_lines("grupo", g, items)))
-    for j in jobs:
-        items = read_assets("video", j)
-        if items:
-            kits.append(f"Solo del video {j}:\n" + "\n".join(assets_lines("video", j, items)))
-    lo = sum(estimates(j)["auto"][0] for j in jobs) // 60
-    hi = sum(estimates(j)["auto"][1] for j in jobs) // 60
-    return (
-        f"Te escribe la app Iconic Studio ({APP_DIR}) de parte de {USUARIO}. "
-        f"Es un LOTE de {n} videos para editar juntos y entregarlos al mismo tiempo:\n" + "\n".join(blocks) + "\n\n"
-        + (("ASSETS que se usan:\n" + "\n\n".join(kits) + "\n"
-            "Los OBLIGATORIOS tienen que salir en el video que corresponde, como dice su nota; los textos van exactos. "
-            "Antes de exportar, revisa uno por uno que estén.\n\n") if kits else "")
-        + (instr + "\n" if (instr := instr_for_claude(jobs, extra)) else "")
-        + "La app guarda lo suyo en projects/<job>/studio/: no lo borres.\n"
-        f"Recuerda: {USUARIO} no es de perfil técnico. Háblale en español sencillo, frases cortas, sin comandos ni rutas.\n\n"
-        f"PEDIDO: edita los {n} videos completos con el flujo edit-video (los 8 pasos, un RUN.md por video), "
-        "directo en el chat. Reutiliza lo que ya esté hecho en la app. "
-        "Trabájalos por etapas, todos a la vez en cada una: primero transcribe uno por uno (nunca dos transcripciones "
-        f"al mismo tiempo), después el corte de los {n}, después audio, y así. "
-        f"Si son de la misma campaña o grupo, que los {n} tengan el mismo look, los mismos subtítulos y el mismo estilo de "
-        f"gráficos. Aplica my-rules.md. NO exportes ninguno hasta que los {n} estén listos: al final exporta los {n} uno tras "
-        f"otro (finalize.sh <job> --apply), para que lleguen juntos a Descargas. "
-        f"Antes de empezar dile en 2 o 3 líneas qué vas a hacer y que puede tardar unos {lo}–{hi} minutos en total; "
-        "en cada etapa, una línea de avance. Al final dile dónde quedaron los videos y pregúntale qué le gustó y qué no, "
-        "para guardarlo con bake-preset."
-    )
+MODELOS = {"sonnet": "sonnet", "opus": "opus"}  # alias de Claude Code: siempre el último de cada uno
 
 
-def open_claude_batch(jobs: list[str], extra: str = "") -> None:
-    jobs = list(dict.fromkeys(j for j in jobs if raw_clip(j)))
-    if len(jobs) < 2:
-        raise ValueError("elige al menos 2 videos (que ya tengan su video importado)")
-    pf = APP_DIR / "cache" / f"lote-{datetime.now():%Y%m%d-%H%M%S}.txt"
-    pf.parent.mkdir(exist_ok=True)
-    pf.write_text(_plain(batch_prompt(jobs, extra)), encoding="utf-8")
-    for j in jobs:
-        st = state_of(j)
-        st["lote"] = {"fecha": datetime.now().isoformat(timespec="seconds"), "videos": jobs}
-        save_state(j, st)
-    launch_claude(f"{len(jobs)} videos juntos", pf)
-
-
-def launch_claude(titulo: str, pf: Path) -> None:
+def launch_claude(titulo: str, pf: Path, modelo: str = "", env_extra: dict | None = None) -> None:
     exe = find_claude()
     if not exe:
         raise RuntimeError("no encuentro Claude Code instalado (instálalo con: winget install Anthropic.ClaudeCode)")
+    model = f"--model {MODELOS[modelo]} " if modelo in MODELOS else ""
     ps = (f"$Host.UI.RawUI.WindowTitle = 'Claude · {titulo.replace(chr(39), '')}'; "
           "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
           f"Set-Location -LiteralPath '{EDITOR}'; "
-          f"& '{exe}' --permission-mode acceptEdits (Get-Content -Raw -Encoding UTF8 -LiteralPath '{pf}')")
-    subprocess.Popen(["powershell.exe", "-NoExit", "-NoProfile", "-Command", ps], cwd=EDITOR, env=claude_env(),
-                     creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+          f"& '{exe}' {model}--permission-mode acceptEdits (Get-Content -Raw -Encoding UTF8 -LiteralPath '{pf}')")
+    subprocess.Popen(["powershell.exe", "-NoExit", "-NoProfile", "-Command", ps], cwd=EDITOR,
+                     env={**claude_env(), **(env_extra or {})}, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+
+
+# --------------------------------------------------------------------------- lotes: un Claude nuevo por video, en fila
+# Una sola ventana para muchos videos va arrastrando toda la conversación: cada mensaje cuesta más y va más lento.
+# La cola abre una ventana nueva por video (cada una empieza liviana; el estilo lo dan my-rules, la carpeta y su
+# ESTILO.md), transcribe antes todos los que falten con la tarjeta de video de la PC (gratis), y deja cada video
+# terminado en una carpeta de entrega: cuando están todos, los pasa juntos a Descargas y avisa.
+
+QUEUE_FILE = APP_DIR / "cache" / "cola.json"
+_queue_lock = threading.Lock()
+
+
+def queue_state() -> dict:
+    return read_json(QUEUE_FILE, {})
+
+
+def _queue_save(q: dict) -> None:
+    write_json(QUEUE_FILE, q)
+
+
+def start_queue(jobs: list[str], extra: str = "", modo: str = "completo", modelo: str = "") -> dict:
+    jobs = list(dict.fromkeys(j for j in jobs if (PROJECTS / j).is_dir() and raw_clip(j)))
+    if not jobs:
+        raise ValueError("elige al menos un video (que ya tenga su video importado)")
+    q = queue_state()
+    if q.get("fase") in ("transcribiendo", "editando"):
+        raise RuntimeError("ya hay un lote trabajando; espera a que termine o detenlo")
+    qid = datetime.now().strftime("%Y%m%d-%H%M%S")
+    q = {"id": qid, "jobs": jobs, "extra": extra.strip(), "modo": "rapido" if modo == "rapido" else "completo",
+         "modelo": modelo if modelo in MODELOS else "", "fase": "transcribiendo", "actual": -1, "inicio_video": 0,
+         "entrega": str(APP_DIR / "cache" / f"entrega-{qid}"), "creado": time.time(), "intentados": [], "entregados": []}
+    Path(q["entrega"]).mkdir(parents=True, exist_ok=True)
+    for j in jobs:  # para la insignia «en lote» de las tarjetas
+        st = state_of(j)
+        st["lote"] = {"fecha": datetime.now().isoformat(timespec="seconds"), "videos": jobs, "modo": q["modo"]}
+        save_state(j, st)
+    _queue_save(q)
+    return q
+
+
+def queue_prompt(job: str, k: int, n: int, q: dict) -> str:
+    p = claude_prompt(job, "auto", "")
+    rapido = MODO_RAPIDO.format(u=USUARIO) if q["modo"] == "rapido" else ""
+    extra = f"INSTRUCCIONES PARA ESTE LOTE:\n{q['extra']}\n" if q.get("extra") else ""
+    return (p + "\n\n" + rapido + extra
+            + f"Este video es el {k} de {n} de un lote que la app edita uno por uno, cada uno en su propia ventana: haz SOLO "
+              "este video. El finalize deja la copia en la carpeta de entrega del lote (VE_EXPORT_DIR): la app la pasa a "
+              f"Descargas cuando estén todos. Cuando termines, dile a {USUARIO} en una línea que este quedó y que puede "
+              "cerrar esta ventana: la app abre sola el siguiente.")
+
+
+def _video_done(job: str, q: dict) -> bool:
+    if (Path(q["entrega"]) / f"{job}.final.mp4").exists():
+        return True
+    final = job_dir(job) / "outputs" / f"{job}.final.mp4"
+    return final.exists() and final.stat().st_mtime >= q.get("inicio_video", 0)
+
+
+def _launch_queue_video(q: dict) -> None:
+    job = q["jobs"][q["actual"]]
+    pf = studio_dir(job) / "claude-contexto.txt"
+    pf.write_text(_plain(queue_prompt(job, q["actual"] + 1, len(q["jobs"]), q)), encoding="utf-8")
+    q["inicio_video"] = time.time()
+    launch_claude(f"{q['actual'] + 1} de {len(q['jobs'])} · {state_of(job)['titulo']}", pf, q.get("modelo", ""),
+                  {"VE_EXPORT_DIR": to_posix(q["entrega"])})
+
+
+def _deliver(q: dict) -> list[str]:
+    """Los videos del lote, juntos a Descargas (sin pisar nada que ya esté ahí)."""
+    dl = Path.home() / "Downloads"
+    out = []
+    for f in sorted(Path(q["entrega"]).glob("*.mp4")):
+        dest, n = dl / f.name, 2
+        while dest.exists():
+            dest, n = dl / f"{f.stem} ({n}){f.suffix}", n + 1
+        shutil.move(str(f), dest)
+        out.append(dest.name)
+    return out
+
+
+def queue_tick() -> None:
+    """Un paso de la cola (lo llama un hilo cada pocos segundos)."""
+    with _queue_lock:
+        q = queue_state()
+        fase = q.get("fase")
+        if fase == "transcribiendo":
+            if TASK.running:
+                return
+            pend = [j for j in q["jobs"] if not (job_dir(j) / "transcript" / "words.json").exists() and j not in q["intentados"]]
+            if pend:  # gratis, con la tarjeta de video; si falla, lo hace Claude en su ventana
+                q["intentados"].append(pend[0])
+                _queue_save(q)
+                try:
+                    run_step(pend[0], "transcribir", {})
+                except Exception:  # noqa: BLE001
+                    pass
+                return
+            q["fase"], q["actual"] = "editando", 0
+            _launch_queue_video(q)
+            _queue_save(q)
+        elif fase == "editando":
+            job = q["jobs"][q["actual"]]
+            if not (q.get("saltar") or _video_done(job, q)):
+                return
+            q.pop("saltar", None)
+            if q["actual"] + 1 < len(q["jobs"]):
+                q["actual"] += 1
+                _launch_queue_video(q)
+            else:
+                q["entregados"] = _deliver(q)
+                q["fase"], q["fin"] = "terminado", time.time()
+                notify("Iconic Studio", f"¡Listos tus {len(q['jobs'])} videos! Están en Descargas.")
+            _queue_save(q)
+
+
+def queue_control(accion: str) -> dict:
+    with _queue_lock:
+        q = queue_state()
+        if accion == "detener" and q.get("fase") in ("transcribiendo", "editando"):
+            q["fase"] = "detenido"
+            q["entregados"] = _deliver(q)  # lo que ya esté terminado no se pierde
+        elif accion == "siguiente" and q.get("fase") == "editando":
+            q["saltar"] = True
+        elif accion == "cerrar" and q.get("fase") in ("terminado", "detenido"):
+            q = {}
+        _queue_save(q)
+    return queue_status()
+
+
+def queue_status() -> dict:
+    q = queue_state()
+    if not q:
+        return {}
+    vids = []
+    for i, j in enumerate(q.get("jobs", [])):
+        if not (PROJECTS / j).is_dir():
+            continue
+        estado = ("listo" if i < q["actual"] or q["fase"] == "terminado" else
+                  "editando" if i == q["actual"] and q["fase"] == "editando" else
+                  "transcribiendo" if q["fase"] == "transcribiendo" and TASK.running and TASK.job == j else "en fila")
+        vids.append({"job": j, "titulo": state_of(j)["titulo"], "estado": estado, "avance": run_progress(j)})
+    return {k: q.get(k) for k in ("id", "fase", "actual", "modo", "modelo", "entregados", "creado", "fin")} | {"videos": vids}
+
+
+def _queue_loop() -> None:
+    while True:
+        time.sleep(5)
+        try:
+            queue_tick()
+        except Exception:  # noqa: BLE001 (que un error no pare la cola para siempre: se reintenta)
+            pass
+
+
+# --------------------------------------------------------------------------- avance de Claude (su RUN.md)
+
+RUN_STEPS = ["Intake", "Rough cut", "Audio polish", "Color grade", "Graphics", "SFX", "Review", "Export"]
+RUN_NAMES = {"Intake": "Copiar el video", "Rough cut": "Corte", "Audio polish": "Audio", "Color grade": "Color",
+             "Graphics": "Gráficos y subtítulos", "SFX": "Efectos de sonido", "Review": "Revisión", "Export": "Exportar"}
+
+
+def run_progress(job: str) -> dict:
+    """Lo que Claude anota en projects/<job>/RUN.md (el flujo edit-video): en qué paso va cada cosa."""
+    f = job_dir(job) / "RUN.md"
+    if not f.exists():
+        return {}
+    text = f.read_text(encoding="utf-8", errors="replace")
+    pasos = []
+    for m in re.finditer(r"^\|\s*(\d)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|", text, re.M):
+        name, status = m.group(2).strip(), m.group(3).strip().lower()
+        est = ("hecho" if status.startswith(("done", "hecho")) else "saltado" if status.startswith(("skip", "n/a")) else
+               "esperando" if status.startswith(("waiting", "esperando")) else
+               "trabajando" if status.startswith(("in progress", "running", "working", "doing")) else "pendiente")
+        pasos.append({"n": int(m.group(1)), "paso": RUN_NAMES.get(name, name), "estado": est})
+    nxt = re.search(r"\*\*Next action:\*\*\s*(.+)", text)
+    hechos = sum(1 for p in pasos if p["estado"] in ("hecho", "saltado"))
+    return {"pasos": pasos, "siguiente": nxt.group(1).strip()[:200] if nxt else "", "hechos": hechos, "total": len(pasos),
+            "modificado": f.stat().st_mtime}
+
+
+# --------------------------------------------------------------------------- comentarios sobre el video
+
+def comments_file(job: str) -> Path:
+    return studio_dir(job) / "comentarios.json"
+
+
+def send_comments(job: str) -> None:
+    """Los comentarios con su minuto, todos juntos en un solo mensaje a Claude (más barato que ir y volver)."""
+    items = read_json(comments_file(job), [])
+    if not items:
+        raise ValueError("todavía no escribiste ningún comentario")
+    fmt = lambda t: f"{int(t // 60)}:{int(t % 60):02d}"  # noqa: E731
+    texto = ("Comentarios en momentos exactos del video terminado (outputs/<job>.final.mp4; el minuto es del video final):\n"
+             + "\n".join(f"- [{fmt(float(c['t']))}] {c['texto']}" for c in sorted(items, key=lambda c: float(c["t"]))))
+    open_claude(job, "comentarios", texto)
+    hist = read_json(studio_dir(job) / "comentarios-enviados.json", [])
+    hist.append({"fecha": datetime.now().isoformat(timespec="seconds"), "comentarios": items})
+    write_json(studio_dir(job) / "comentarios-enviados.json", hist)
+    write_json(comments_file(job), [])
+
+
+# --------------------------------------------------------------------------- aprender el estilo de una carpeta
+
+def learn_style(gid: str) -> None:
+    d = assets_dir("grupo", gid)
+    jobs = [p.name for p in PROJECTS.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))
+            and state_of(p.name).get("grupo") == gid and (p / "outputs" / f"{p.name}.final.mp4").exists()]
+    if not jobs:
+        raise ValueError("esta carpeta todavía no tiene videos terminados de los que aprender")
+    d.mkdir(parents=True, exist_ok=True)
+    had = (d / STYLE_FILE).exists()
+    pf = APP_DIR / "cache" / f"aprender-{gid}.txt"
+    pf.parent.mkdir(exist_ok=True)
+    pf.write_text(_plain(
+        f"Te escribe la app Iconic Studio ({APP_DIR}) de parte de {USUARIO}. "
+        f"Recuerda: {USUARIO} no es de perfil técnico. Háblale en español sencillo, frases cortas, sin comandos ni rutas.\n\n"
+        f"PEDIDO: aprende el estilo de edición de la carpeta «{group_name(gid)}» (una campaña), para que los próximos "
+        "videos de esta carpeta salgan igual y gastando menos. "
+        f"{'Ya hay un ESTILO.md: actualízalo con lo nuevo, sin perder lo que sigue valiendo. ' if had else ''}"
+        f"Estudia sus videos terminados: {', '.join('projects/' + j for j in jobs)} — de cada uno su RUN.md, "
+        "graphics-plan.json/.md, el plan de sonidos, lo que hay en hf-graphics/ (scripts, comps, ajustes de subtítulos), "
+        f"y lo que {USUARIO} comentó (studio/comentarios-enviados.json, si hay). Mira también las instrucciones y assets "
+        f"de la carpeta (projects/_grupos/{gid}/ASSETS.md) y my-rules.md.\n"
+        f"Escribe projects/_grupos/{gid}/{STYLE_FILE}: una receta corta y concreta para que otra sesión de Claude edite un "
+        "video NUEVO de esta campaña sin volver a decidir lo ya decidido: formato y preset; ritmo de corte; subtítulos "
+        "(estilo, tamaño, palabras resaltadas); gráficos (qué tipo, dónde, cuántos, con ejemplos); efectos de sonido; "
+        "gancho; colores y letras; qué aprobó y qué pidió cambiar. Y una sección «Piezas para reutilizar» con lo ya "
+        f"probado: copia los scripts, comps o plantillas que sirvan a projects/_grupos/{gid}/plantilla/ (para que no "
+        "dependan de un video) y explica cómo usarlos. No cambies ningún video. "
+        "Al final dile en dos frases qué aprendiste y que desde ahora los videos de esa carpeta lo usan solos."), encoding="utf-8")
+    launch_claude(f"aprender el estilo · {group_name(gid)}", pf)
+
+
+def style_info(gid: str) -> dict:
+    f = assets_dir("grupo", gid) / STYLE_FILE
+    done = [p.name for p in PROJECTS.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))
+            and state_of(p.name).get("grupo") == gid and (p / "outputs" / f"{p.name}.final.mp4").exists()]
+    return {"existe": f.exists(), "fecha": datetime.fromtimestamp(f.stat().st_mtime).isoformat(timespec="minutes") if f.exists() else "",
+            "terminados": len(done)}
+
+
+# --------------------------------------------------------------------------- aviso de Windows
+
+def notify(titulo: str, texto: str) -> None:
+    """Una notificación de Windows (la de la esquina), sin instalar nada."""
+    esc = lambda s: s.replace("&", "&amp;").replace("<", "&lt;").replace("'", "&apos;")  # noqa: E731
+    ps = ("[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; "
+          "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null; "
+          "$x = New-Object Windows.Data.Xml.Dom.XmlDocument; "
+          f"$x.LoadXml('<toast><visual><binding template=\"ToastGeneric\"><text>{esc(titulo)}</text><text>{esc(texto)}</text>"
+          "</binding></visual></toast>'); "
+          "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("
+          "'{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show("
+          "[Windows.UI.Notifications.ToastNotification]::new($x))")
+    try:
+        subprocess.Popen(["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps], creationflags=NO_WINDOW)
+    except OSError:
+        pass
 
 
 def claude_env() -> dict:
@@ -1460,6 +1726,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"grupos": read_groups()})
         if parts[:2] == ["api", "cuenta"]:
             return self._json(account_status())
+        if parts[:2] == ["api", "cola"]:
+            return self._json(queue_status())
+        if parts[:2] == ["api", "grupo"] and len(parts) == 4 and parts[3] == "estilo":
+            return self._json(style_info(parts[2]))
         if parts[:2] == ["api", "instalacion"]:
             return self._json({**setup_state(), "usuario": USUARIO, "claude": bool(find_claude())})
         if parts[:2] == ["api", "actualizacion"]:
@@ -1487,6 +1757,10 @@ class Handler(BaseHTTPRequestHandler):
                 edits = read_json(studio_dir(job) / "edits.json", {"borradas": []})
                 return self._json({"palabras": flat_words(job), "borradas": edits.get("borradas", []),
                                    "versiones": edits.get("versiones", [])})
+            if parts[3] == "avance":
+                return self._json(run_progress(job))
+            if parts[3] == "comentarios":
+                return self._json({"comentarios": read_json(comments_file(job), [])})
             if parts[3] == "log":
                 p = studio_dir(job) / "logs" / f"{parts[4]}.log"
                 return self._json({"lines": p.read_text(encoding="utf-8").splitlines() if p.exists() else []})
@@ -1531,8 +1805,14 @@ class Handler(BaseHTTPRequestHandler):
                 account_login(str(body.get("correo", "")))
                 return self._json({"ok": True})
             return self._json(account_status())
+        if parts[:2] == ["api", "cola"]:
+            return self._json(queue_control(str(body.get("accion", ""))))
+        if parts[:2] == ["api", "grupo"] and len(parts) == 4 and parts[3] == "aprender":
+            learn_style(parts[2])
+            return self._json({"ok": True})
         if parts[:2] == ["api", "lote"]:
-            open_claude_batch([str(j) for j in body.get("jobs", [])], str(body.get("instrucciones", "")))
+            start_queue([str(j) for j in body.get("jobs", [])], str(body.get("instrucciones", "")),
+                        str(body.get("modo", "completo")), str(body.get("modelo", "")))
             return self._json({"ok": True})
         if parts[:2] == ["api", "projects"]:
             origen = body.get("origenes") or [body.get("origen", "")]
@@ -1572,6 +1852,14 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     edit_parts(job, body.get("orden"), body.get("quitar"))
                 return self._json({"ok": True})
+            if action == "comentarios":
+                if body.get("enviar"):
+                    send_comments(job)
+                    return self._json({"ok": True, "comentarios": []})
+                clean = [{"t": round(float(c.get("t", 0)), 2), "texto": str(c.get("texto", "")).strip()[:1000]}
+                         for c in body.get("comentarios", []) if str(c.get("texto", "")).strip()]
+                write_json(comments_file(job), clean)
+                return self._json({"comentarios": clean})
             if action == "claude":
                 open_claude(job, body.get("modo", "libre"), str(body.get("texto", "")))
                 return self._json({"ok": True})
@@ -1665,9 +1953,11 @@ def main():
             server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     if port:  # solo servidor (pruebas)
+        threading.Thread(target=_queue_loop, daemon=True).start()
         print(url, flush=True)
         server.serve_forever()
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=_queue_loop, daemon=True).start()  # la cola de lotes sigue aunque se haya cerrado la app
     if "--browser" in sys.argv:
         print(url)
         webbrowser.open(url)
