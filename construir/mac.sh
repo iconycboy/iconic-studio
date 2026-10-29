@@ -32,7 +32,7 @@ mkdir -p "$RES/estudio"
 cp app.py LEEME.md icono.ico icono.png actualizaciones.json "$RES/estudio/"
 cp -R ui "$RES/estudio/ui"
 gh release download editor --repo "$REPO" -p video-editor.zip -p video-editor.zip.sha256 -D "$B"
-(cd "$B" && shasum -a 256 -c video-editor.zip.sha256)
+(cd "$B" && tr -d '\r' < video-editor.zip.sha256 | shasum -a 256 -c)
 mv "$B/video-editor.zip" "$RES/video-editor.zip"
 
 echo "▸ firmando (ad hoc)"
