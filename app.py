@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.4.0"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.5.0"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"

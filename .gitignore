@@ -7,3 +7,5 @@ build/
 __pycache__/
 # lo de esta PC: rutas al .zip del editor (ver construir/editor.ejemplo.json)
 construir/editor.json
+# ajustes de Claude Code en esta PC (servidor de pruebas)
+.claude/
