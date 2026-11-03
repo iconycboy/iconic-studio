@@ -87,13 +87,17 @@ function renderGuiones() {
         <div class="row"><label class="check"><input type="checkbox" ${v._off ? "" : "checked"} onchange="GU.data.videos[${i}]._off=!this.checked;renderGuiones()">
           <span class="gu-n">${esc(v.numero)}</span></label>
           <input class="grow" value="${esc(v.titulo)}" oninput="GU.data.videos[${i}].titulo=this.value" title="El nombre del video">
-          ${v.voz_en_off ? `<span class="tagpill" title="Este guion lleva voz en off">🎙 voz en off</span>` : ""}</div>
-        <details><summary class="muted small">${esc((v.hooks[0] || v.guion).slice(0, 110))}${(v.hooks[0] || v.guion).length > 110 ? "…" : ""}
+          ${v.voz_en_off || v._voz?.length ? `<span class="tagpill" title="${v._voz?.length ? "Con su audio de voz en off" : "Este guion lleva voz en off: puedes agregar su audio"}">🎙 voz en off${v._voz?.length ? " ✓" : ""}</span>` : ""}</div>
+        <details ${GU.open === i ? "open" : ""} ontoggle="if(this.open)GU.open=${i}"><summary class="muted small">${esc((v.hooks[0] || v.guion).slice(0, 110))}${(v.hooks[0] || v.guion).length > 110 ? "…" : ""}
           <span class="gu-more">ver y editar</span></summary>
           <label>Hook${v.hooks.length > 1 ? "s (uno por línea)" : ""}</label>
           <textarea rows="${Math.max(1, v.hooks.length)}" oninput="GU.data.videos[${i}].hooks=this.value.split('\\n')">${esc(v.hooks.join("\n"))}</textarea>
           <label>Guion</label><textarea rows="6" oninput="GU.data.videos[${i}].guion=this.value">${esc(v.guion)}</textarea>
-          <label>Voz en off <span class="muted">(si lleva)</span></label><textarea rows="2" oninput="GU.data.videos[${i}].voz_en_off=this.value">${esc(v.voz_en_off)}</textarea>
+          <label>Voz en off <span class="muted">(si lleva: el texto y, si ya la grabaste, el audio)</span></label><textarea rows="2" oninput="GU.data.videos[${i}].voz_en_off=this.value">${esc(v.voz_en_off)}</textarea>
+          <div class="row">${(v._voz || []).map((f, k) => `<span class="file grow"><span class="file-n">🎵</span><span class="grow ellipsis" title="${esc(f)}">${esc(baseName(f))}</span>
+              <button class="btn ghost" title="Quitar" onclick="GU.data.videos[${i}]._voz.splice(${k},1);renderGuiones()">✕</button></span>`).join("")}
+            ${window.pywebview ? `<button class="btn" onclick="pickGuionVoz(${i})">🎙 Agregar el audio de la voz en off…</button>`
+              : `<input class="grow" placeholder="Ruta del audio de la voz en off y Enter" onkeydown="if(event.key==='Enter'&&this.value.trim())addGuionVoz(${i},[this.value.trim().replace(/^\\x22|\\x22$/g,'')])">`}</div>
           <label>Notas para editar</label><textarea rows="2" oninput="GU.data.videos[${i}].notas=this.value">${esc(v.notas)}</textarea>
         </details></div>`).join("")}</div>
       <label>¿En qué idioma vas a grabar?</label>
@@ -106,6 +110,19 @@ function renderGuiones() {
   }
   $("#modal-guiones .modal-card").innerHTML = head + body;
 }
+
+// la voz en off de un guion, antes de crear su video: se sube a sus assets cuando el video ya existe
+const AUDIO_RE = /\.(mp3|wav|m4a|aac|ogg)$/i;
+function addGuionVoz(i, paths) {
+  const ok = paths.filter((p) => AUDIO_RE.test(p));
+  if (ok.length < paths.length) toast("La voz en off tiene que ser un audio (.mp3, .wav, .m4a…)", true);
+  if (!ok.length) return;
+  const v = GU.data.videos[i];
+  v._voz = [...new Set([...(v._voz || []), ...ok])];
+  GU.open = i;
+  renderGuiones();
+}
+async function pickGuionVoz(i) { addGuionVoz(i, (await window.pywebview.api.elegir_audio()) || []); }
 
 async function pickGuionesDoc() {
   if (!window.pywebview) return toast("Pega la ruta del documento en el campo de abajo y presiona Enter");
@@ -133,6 +150,11 @@ async function createGuiones() {
   try {
     const d = await api(`/api/grupo/${GU.gid}/guiones`, { crear: 1, videos, idioma: $("#gu-lang").value,
       general: D.general || "", guardar_general: !!D.guardar });
+    let fallo = "";
+    for (const [k, v] of videos.entries()) {  // los videos vuelven en el mismo orden en que se mandaron
+      if (v._voz?.length) await api(`/api/project/${d.jobs[k]}/voz`, { agregar: v._voz }).catch((e) => { fallo = e.message; });
+    }
+    if (fallo) toast(`No se pudo agregar una voz en off: ${fallo}`, true);
     closeGuiones();
     groupFilter = GU.gid; store("grupo-filtro", GU.gid);
     await loadProjects();

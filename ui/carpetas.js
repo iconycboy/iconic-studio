@@ -55,9 +55,7 @@ function renderFolders() {
   } else if (groupFilter === "-" || searching()) {
     box.innerHTML = groupFilter === "-" ? `<div class="folder-head"><button class="btn ghost" onclick="setGroupFilter('')">${ico("back")} Mis videos</button>
       <h2>Videos sin carpeta</h2></div>` : "";
-  } else if (!projects.length && !GROUPS.length) {  // instalación nueva: solo el mensaje de «todavía no hay videos»
-    box.innerHTML = "";
-  } else {  // inicio: las carpetas y, debajo, los videos sueltos
+  } else {  // inicio: las carpetas (aunque no haya ninguna: para poder crear la primera) y, debajo, los videos sueltos
     const loose = projects.filter((p) => !p.grupo).length;
     box.innerHTML = `<div class="section-label">Carpetas <span class="muted small">— una por campaña, marca o cliente. Arrastra un video encima para guardarlo ahí.</span></div>
       <div class="folder-grid">${GROUPS.map(folderTile).join("")}
