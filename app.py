@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.5.1"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.6.0"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
@@ -279,6 +279,7 @@ def project_summary(job: str) -> dict:
         "lote": st.get("lote"),
         "instrucciones": st.get("instrucciones", ""),
         "guion": st.get("guion"),
+        "carpeta_win": st.get("carpeta_win", "") if espacio() else "",
         "duracion": video_duration(job),
         "estimado": estimates(job),
     }
@@ -351,6 +352,8 @@ def save_assets(scope: str, ident: str, items: list[dict]) -> list[dict]:
                 "uso": str(a.get("uso", "")).strip()[:600], "obligatorio": bool(a.get("obligatorio", True))}
         if a.get("voz") and tipo == "audio":  # la voz en off de un guion
             item["voz"] = True
+        if a.get("origen"):  # de dónde se copió (para no volver a meterlo desde la carpeta de mis videos)
+            item["origen"] = str(a["origen"])[:500]
         if tipo == "texto":
             item["texto"] = str(a.get("texto", "")).strip()[:2000]
             if not item["texto"]:
@@ -389,7 +392,8 @@ def add_asset_files(scope: str, ident: str, sources: list[str]) -> list[dict]:
         while (d / name).exists():
             name, n = f"{re.sub(r'[^A-Za-z0-9._-]+', '_', s.stem)[:50]}-{n}{s.suffix.lower()}", n + 1
         shutil.copy2(s, d / name)  # copiar, nunca mover
-        items.append({"tipo": kind, "archivo": name, "nombre": s.name, "uso": "", "obligatorio": scope != "material"})
+        items.append({"tipo": kind, "archivo": name, "nombre": s.name, "uso": "", "obligatorio": scope != "material",
+                      "origen": str(s)})
     return save_assets(scope, ident, items)
 
 
@@ -528,6 +532,7 @@ def create_project(sources: list[str], titulo: str, idioma: str, grupo: str = ""
     save_state(job, {"titulo": titulo or src.stem, "idioma": idioma, "notas": "", "grupo": grupo,
                      "creado": datetime.now().isoformat(timespec="seconds"), "pasos": {},
                      "origen": sources})
+    nueva_carpeta_win(job)
     # copiar (nunca mover) los originales: paso 1 del editor
     TASK.start(job, "importar", [["py", lambda t: copy_parts(t, job, sources)], ["proxy"]])
     return {"job": job}
@@ -548,6 +553,7 @@ def create_projects(sources: list[str], titulo: str, idioma: str, grupo: str = "
             (PROJECTS / job / sub).mkdir(parents=True, exist_ok=True)
         save_state(job, {"titulo": name, "idioma": idioma, "notas": "", "grupo": grupo,
                          "creado": datetime.now().isoformat(timespec="seconds"), "pasos": {}, "origen": [src]})
+        nueva_carpeta_win(job)
         jobs.append((job, src))
     import_in_line([(j, [s]) for j, s in jobs])
     return {"jobs": [j for j, _ in jobs]}
@@ -655,6 +661,9 @@ def split_guiones(gid: str, texto: str = "", archivo: str = "") -> None:
             old.unlink()
         copy = d / f"guiones-original{s.suffix.lower()}"
         shutil.copy2(s, copy)  # copiar, nunca mover
+        camp = campaign_dir(gid)
+        if camp and s.parent.resolve() != (camp / SUB_GUIONES).resolve() and not (camp / SUB_GUIONES / s.name).exists():
+            shutil.copy2(s, camp / SUB_GUIONES / s.name)  # que quede también con la campaña, en su carpeta de Windows
         texto = doc_text(copy)
         if not texto.strip():
             doc = copy.relative_to(EDITOR).as_posix()  # un .pdf (o un .docx sin texto): que lo lea Claude
@@ -697,11 +706,15 @@ def split_guiones(gid: str, texto: str = "", archivo: str = "") -> None:
 
 
 def guiones_status(gid: str) -> dict:
+    camp = campaign_dir(gid)
+    docs = {"documentos": sorted((str(f) for f in (camp / SUB_GUIONES).iterdir()
+                                  if f.is_file() and f.suffix.lower() in DOC_EXT and not f.name.startswith("~$")),
+                                 key=lambda p: -Path(p).stat().st_mtime)} if camp else {}
     run = GUIONES_RUN.get(gid)
     if run:
-        return {**run, "segundos": round(time.time() - run.get("inicio", time.time()))}
+        return {**run, **docs, "segundos": round(time.time() - run.get("inicio", time.time()))}
     data = read_json(guiones_file(gid), None)
-    return {"estado": "listo", **data} if data else {"estado": "nada"}
+    return {"estado": "listo", **data, **docs} if data else {"estado": "nada", **docs}
 
 
 def create_slots(gid: str, videos: list[dict], idioma: str, general: str = "", guardar_general: bool = False) -> dict:
@@ -715,17 +728,9 @@ def create_slots(gid: str, videos: list[dict], idioma: str, general: str = "", g
     jobs = []
     for i, v in enumerate(videos):
         name = f"{v['numero']}. {v['titulo']}" if v["numero"] else v["titulo"]
-        base = slugify(f"{group_name(gid)} {name}")
-        job, n = base, 2
-        while (PROJECTS / job).exists():
-            job, n = f"{base}-{n}", n + 1
-        for sub in ("raw", "audio", "assets", "broll", "outputs", "transcript", "studio"):
-            (PROJECTS / job / sub).mkdir(parents=True, exist_ok=True)
         # la lista va de más nuevo a más viejo: el guion 1 queda «más nuevo» para que salga primero
         creado = datetime.fromtimestamp(now.timestamp() + len(videos) - i).isoformat(timespec="seconds")
-        save_state(job, {"titulo": name, "idioma": idioma, "notas": "", "grupo": gid, "creado": creado,
-                         "pasos": {}, "origen": [], "guion": v})
-        jobs.append(job)
+        jobs.append(new_empty_job(name, gid, idioma, creado, guion=v))
     general = str(general).strip()
     if guardar_general and general:
         prev = read_instr("grupo", gid)
@@ -801,6 +806,265 @@ def guion_for_claude(job: str) -> str:
     return txt
 
 
+def new_empty_job(titulo: str, gid: str, idioma: str, creado: str = "", **extra) -> str:
+    """Un video todavía sin grabación (de un guion, o de una carpeta que se hizo en Windows)."""
+    base = slugify(f"{group_name(gid)} {titulo}" if gid else titulo)
+    job, n = base, 2
+    while (PROJECTS / job).exists():
+        job, n = f"{base}-{n}", n + 1
+    for sub in ("raw", "audio", "assets", "broll", "outputs", "transcript", "studio"):
+        (PROJECTS / job / sub).mkdir(parents=True, exist_ok=True)
+    save_state(job, {"titulo": titulo, "idioma": idioma, "notas": "", "grupo": gid, "pasos": {}, "origen": [],
+                     "creado": creado or datetime.now().isoformat(timespec="seconds"), **extra})
+    nueva_carpeta_win(job)
+    return job
+
+
+# --------------------------------------------------------------------------- carpeta de mis videos (opcional)
+# Si se elige una (config «espacio», ej: Documentos\1UGC), la app arma ahí una carpeta de Windows por cada carpeta de la
+# app (campaña), con «guiones» (sus documentos) y «assets» (los que comparten todos sus videos), y dentro una por video
+# con «assets», «voice en off» y «raw vid». Lo que pongas en cada una entra solo a la app según dónde está (no hace
+# falta adivinar qué es), y el video terminado queda en la carpeta del video en vez de Descargas. Una carpeta que hagas
+# tú en Windows también entra: en la raíz, como campaña; dentro de una campaña, como video. Sin «espacio», nada cambia.
+
+SUB_ASSETS, SUB_VOZ, SUB_RAW, SUB_GUIONES = "assets", "voice en off", "raw vid", "guiones"
+SUELTOS = "Sin carpeta"  # los videos que no están en ninguna campaña
+RESERVADAS = {SUB_ASSETS, SUB_VOZ, SUB_RAW, SUB_GUIONES, SUELTOS.lower()}
+ESPACIO_MAP = PROJECTS / "_grupos" / "carpetas.json"  # {"grupos": {id: ruta}, "ignorar": [rutas]}
+_espacio_lock = threading.RLock()
+
+
+def espacio() -> Path | None:
+    e = str(CFG.get("espacio") or "")
+    return Path(e) if e and Path(e).is_dir() else None
+
+
+def win_name(text: str) -> str:
+    """Un nombre que Windows acepta para una carpeta (sin \\ / : * ? \" < > |, ni punto al final)."""
+    t = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', " ", str(text))
+    return re.sub(r"\s+", " ", t).strip().rstrip(". ")[:80] or "video"
+
+
+def _espacio_map() -> dict:
+    m = read_json(ESPACIO_MAP, {})
+    m.setdefault("grupos", {})
+    m.setdefault("ignorar", [])
+    return m
+
+
+def _same(a: Path, b: Path) -> bool:
+    return os.path.normcase(str(a.resolve())) == os.path.normcase(str(b.resolve()))
+
+
+def set_espacio(ruta: str) -> dict:
+    ruta = str(ruta or "").strip().strip('"')
+    if ruta:
+        p = Path(ruta)
+        if not p.is_absolute():
+            raise ValueError("elige la carpeta completa (ej: C:\\Users\\tu\\Documents\\1UGC)")
+        if not p.exists() and p.parent.is_dir():
+            p.mkdir()
+        if not p.is_dir():
+            raise ValueError(f"no encuentro la carpeta «{ruta}»")
+        if _same(p, EDITOR) or EDITOR.resolve() in p.resolve().parents or _same(p, Path.home()):
+            raise ValueError("elige una carpeta solo para tus videos (no la del editor ni toda tu carpeta de usuario)")
+        ruta = str(p)
+    CFG["espacio"] = ruta
+    CONFIG_FILE.write_text(json.dumps(CFG, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {"espacio": ruta, **(revisar_espacio() if ruta else {})}
+
+
+def campaign_dir(gid: str) -> Path | None:
+    """La carpeta de Windows de una campaña (la crea si falta); la de un nombre igual que ya exista, si la hiciste tú."""
+    root = espacio()
+    if not root or not gid or not any(g.get("id") == gid for g in read_groups()):
+        return None
+    with _espacio_lock:
+        m = _espacio_map()
+        d = Path(m["grupos"][gid]) if gid in m["grupos"] else None
+        if d is None:
+            name = win_name(group_name(gid))
+            d = next((c for c in root.iterdir() if c.is_dir() and c.name.lower() == name.lower()), root / name)
+            m["grupos"][gid] = str(d)
+            write_json(ESPACIO_MAP, m)
+        for s in (SUB_GUIONES, SUB_ASSETS):
+            (d / s).mkdir(parents=True, exist_ok=True)
+        return d
+
+
+def video_dir(job: str, crear: bool = True) -> Path | None:
+    """La carpeta de Windows de un video: <campaña>\\<título del video>\\ con assets, voice en off y raw vid."""
+    root = espacio()
+    if not root:
+        return None
+    with _espacio_lock:
+        st = state_of(job)
+        d = Path(st["carpeta_win"]) if st.get("carpeta_win") else None
+        if d is None:
+            if not crear:
+                return None
+            parent = campaign_dir(st.get("grupo", "")) or root / SUELTOS
+            otras = {os.path.normcase(str(state_of(j).get("carpeta_win", ""))) for j in all_jobs() if j != job}
+            base = win_name(st["titulo"])
+            d, n = parent / base, 2
+            while os.path.normcase(str(d)) in otras:  # una que ya existe sin dueño (la hiciste tú) se usa
+                d, n = parent / f"{base} ({n})", n + 1
+            st["carpeta_win"] = str(d)
+            save_state(job, st)
+        if crear:
+            for s in (SUB_ASSETS, SUB_VOZ, SUB_RAW):
+                (d / s).mkdir(parents=True, exist_ok=True)
+            g = st.get("guion")
+            if g and not (d / "guion.txt").exists():  # para leerlo mientras grabas
+                (d / "guion.txt").write_text("\n\n".join(x for x in [
+                    "HOOK:\n" + "\n".join(g.get("hooks") or []) if g.get("hooks") else "",
+                    f"GUION:\n{g['guion']}" if g.get("guion") else "",
+                    f"VOZ EN OFF:\n{g['voz_en_off']}" if g.get("voz_en_off") else "",
+                    f"NOTAS:\n{g['notas']}" if g.get("notas") else ""] if x) + "\n", encoding="utf-8")
+        return d
+
+
+def nueva_carpeta_win(job: str) -> None:
+    try:
+        video_dir(job)
+    except OSError:
+        pass  # la app sigue igual aunque no se pueda escribir ahí
+
+
+def all_jobs() -> list[str]:
+    return [p.name for p in PROJECTS.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))] if PROJECTS.exists() else []
+
+
+def export_dir(job: str) -> Path:
+    """Dónde queda la copia del video terminado: en su carpeta, si hay carpeta de mis videos; si no, en Descargas."""
+    try:
+        d = video_dir(job)
+    except OSError:
+        d = None
+    return d or Path.home() / "Downloads"
+
+
+def export_label(job: str) -> str:
+    return f"su carpeta ({export_dir(job)})" if espacio() else "tu carpeta Descargas"
+
+
+def _new_files(folder: Path, known: set[str], kinds: set[str] | None = None) -> list[str]:
+    """Los archivos de la carpeta que la app todavía no tiene (ni los temporales de Office o del explorador)."""
+    if not folder.is_dir():
+        return []
+    out = []
+    for f in sorted(folder.iterdir(), key=lambda p: p.name.lower()):
+        if not f.is_file() or f.name.startswith(("~$", ".")) or f.name.lower() in ("desktop.ini", "thumbs.db"):
+            continue
+        kind = "video" if f.suffix.lower() in VIDEO_EXT else ASSET_KIND.get(f.suffix.lower())
+        if kinds is not None and kind not in kinds:
+            continue
+        if kind and os.path.normcase(str(f)) not in known and f.name.lower() not in known:
+            out.append(str(f))
+    return out
+
+
+def _known_assets(scope: str, ident: str) -> set[str]:
+    items = read_assets(scope, ident)
+    return ({os.path.normcase(str(a["origen"])) for a in items if a.get("origen")}
+            | {str(a.get("nombre", "")).lower() for a in items if a.get("nombre")})
+
+
+def revisar_espacio() -> dict:
+    """Mira la carpeta de mis videos y mete en la app lo nuevo: campañas y videos que hiciste en Windows, y lo que pusiste
+    en cada subcarpeta (raw vid → la grabación, voice en off → la voz en off, assets → los assets). Nunca borra nada."""
+    root = espacio()
+    if not root:
+        return {"activo": False, "hechos": []}
+    hechos = []
+    with _espacio_lock:
+        m = _espacio_map()
+        ign = {os.path.normcase(p) for p in m["ignorar"]}
+        groups = read_groups()
+        # 1. una carpeta nueva en la raíz es una campaña nueva
+        mapped = {os.path.normcase(str(Path(p))) for p in m["grupos"].values()}
+        names = {g["nombre"].lower(): g["id"] for g in groups}
+        for c in sorted(root.iterdir(), key=lambda p: p.name.lower()):
+            key = os.path.normcase(str(c))
+            if (not c.is_dir() or c.name.startswith((".", "_")) or c.name.lower() in RESERVADAS
+                    or key in mapped or key in ign):
+                continue
+            if c.name.lower() in names:  # ya hay una carpeta con ese nombre en la app: son la misma
+                m["grupos"][names[c.name.lower()]] = str(c)
+            else:
+                base, gid, n = slugify(c.name), slugify(c.name), 2
+                while any(g["id"] == gid for g in groups):
+                    gid, n = f"{base}-{n}", n + 1
+                colors = ["#ff5fae", "#ff7a59", "#f5b84a", "#3ecf8e", "#22c3c3", "#6c8cff", "#b06cff", "#8b92a3"]
+                groups.append({"id": gid, "nombre": c.name[:40], "color": colors[len(groups) % len(colors)], "emoji": "📁"})
+                write_json(GROUPS_FILE, groups)
+                m["grupos"][gid] = str(c)
+                hechos.append(f"carpeta nueva «{c.name}»")
+            write_json(ESPACIO_MAP, m)
+        jobs = all_jobs()
+        claimed = {os.path.normcase(str(state_of(j).get("carpeta_win", ""))) for j in jobs}
+        for g in groups:
+            d = campaign_dir(g["id"])
+            if not d:
+                continue
+            new = _new_files(d / SUB_ASSETS, _known_assets("grupo", g["id"]), set(ASSET_KIND.values()))
+            if new:
+                add_asset_files("grupo", g["id"], new)
+                hechos.append(f"{len(new)} asset{'s' if len(new) > 1 else ''} de la campaña «{g['nombre']}»")
+            # 2. una carpeta nueva dentro de una campaña es un video nuevo
+            for c in sorted(d.iterdir(), key=lambda p: p.name.lower()):
+                key = os.path.normcase(str(c))
+                if (not c.is_dir() or c.name.startswith((".", "_")) or c.name.lower() in RESERVADAS
+                        or key in claimed or key in ign):
+                    continue
+                job = new_empty_job(c.name, g["id"], CFG["idioma"], carpeta_win=str(c))
+                jobs.append(job)
+                claimed.add(key)
+                hechos.append(f"video nuevo «{c.name}» en «{g['nombre']}»")
+        # 3. lo que hay dentro de la carpeta de cada video
+        grabar = {}
+        for j in jobs:
+            try:
+                d = video_dir(j)
+            except OSError:
+                continue
+            st = state_of(j)
+            known = {os.path.normcase(str(o)) for o in (st.get("origen") or []) if o}
+            raw = _new_files(d / SUB_RAW, known, {"video"})
+            if raw:
+                if not partes(j):
+                    grabar[j] = raw
+                    hechos.append(f"la grabación de «{st['titulo']}»")
+                elif not st.get("raw_avisado") or set(st["raw_avisado"]) != set(raw):
+                    st["raw_avisado"] = raw
+                    save_state(j, st)
+                    hechos.append(f"hay grabaciones nuevas en «raw vid» de «{st['titulo']}», pero ya tiene su video: "
+                                  "si son otra parte, agrégalas desde el video")
+            voz = _new_files(d / SUB_VOZ, _known_assets("video", j), {"audio"})
+            if voz:
+                add_voiceover(j, voz)
+                hechos.append(f"la voz en off de «{st['titulo']}»")
+            kit = _new_files(d / SUB_ASSETS, _known_assets("video", j), set(ASSET_KIND.values()))
+            if kit:
+                add_asset_files("video", j, kit)
+                hechos.append(f"{len(kit)} asset{'s' if len(kit) > 1 else ''} de «{st['titulo']}»")
+        if grabar:
+            upload_recordings(grabar)
+    return {"activo": True, "espacio": str(root), "hechos": hechos}
+
+
+def forget_folder(p: str) -> None:
+    """Una carpeta de Windows que ya no es de la app (se borró su video o su campaña): no volver a meterla."""
+    if not p:
+        return
+    with _espacio_lock:
+        m = _espacio_map()
+        m["grupos"] = {k: v for k, v in m["grupos"].items() if os.path.normcase(v) != os.path.normcase(p)}
+        if os.path.normcase(p) not in {os.path.normcase(x) for x in m["ignorar"]}:
+            m["ignorar"].append(p)
+        write_json(ESPACIO_MAP, m)
+
+
 def delete_project(job: str) -> dict:
     """A la Papelera de reciclaje, nunca borrado para siempre: con el script del editor, que primero comprueba que
     la Papelera lo pueda recibir entero y después confirma que llegó (CLAUDE.md § Rules, clearing out an old job)."""
@@ -809,6 +1073,7 @@ def delete_project(job: str) -> dict:
         raise ValueError("ese video ya no existe")
     if TASK.running and TASK.job == job:
         raise RuntimeError("este video está trabajando ahora; espera a que termine para borrarlo")
+    forget_folder(str(state_of(job).get("carpeta_win", "")))  # su carpeta de Windows queda, pero ya no vuelve a entrar
     if MAC:  # a la Papelera con el Finder (se puede sacar de ahí mientras no se vacíe)
         out = subprocess.run(["osascript", "-e", "on run argv", "-e",
                               'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)',
@@ -1477,7 +1742,8 @@ def claude_prompt(job: str, modo: str, texto: str) -> str:
     if modo == "auto":
         return ctx + (
             "PEDIDO: edita este video completo, de principio a fin, con el flujo edit-video (los 8 pasos), "
-            "directo en el chat y terminando con el MP4 exportado (finalize.sh --apply, que deja una copia en Descargas). "
+            "directo en el chat y terminando con el MP4 exportado (finalize.sh --apply, que deja una copia en "
+            f"{export_label(job)}). "
             "Si ya hay pasos hechos en la app (transcripción, corte), reutilízalos en vez de repetirlos. "
             f"Aplica todo lo que dice my-rules.md sobre el estilo de {USUARIO}. "
             "Antes de empezar dile en 2 o 3 líneas qué vas a hacer y cuánto puede tardar; en cada paso, una línea de avance. "
@@ -1507,7 +1773,7 @@ def open_claude(job: str, modo: str = "libre", texto: str = "") -> None:
     Es Claude Code normal con el plan del usuario: la app solo lo lanza, no habla con él."""
     pf = studio_dir(job) / "claude-contexto.txt"
     pf.write_text(_plain(claude_prompt(job, modo, texto)), encoding="utf-8")
-    launch_claude(state_of(job)["titulo"], pf)
+    launch_claude(state_of(job)["titulo"], pf, env_extra={"VE_EXPORT_DIR": to_posix(export_dir(job))} if espacio() else None)
 
 
 MODELOS = {"sonnet": "sonnet", "opus": "opus"}  # alias de Claude Code: siempre el último de cada uno
@@ -1587,7 +1853,7 @@ def queue_prompt(job: str, k: int, n: int, q: dict) -> str:
               + ("Otra ventana edita otro video al mismo tiempo: no toques sus archivos, y si tuvieras que transcribir, espera "
                  "a que no haya otra transcripción corriendo en la PC (una a la vez). " if q.get("paralelo") == 2 else "")
               + "El finalize deja la copia en la carpeta de entrega del lote (VE_EXPORT_DIR): la app la pasa a "
-              f"Descargas cuando estén todos. Cuando termines, dile a {USUARIO} en una línea que este quedó y que puede "
+              f"{export_label(job)} cuando estén todos. Cuando termines, dile a {USUARIO} en una línea que este quedó y que puede "
               "cerrar esta ventana: la app abre sola el siguiente.")
 
 
@@ -1619,10 +1885,11 @@ def _launch_queue_video(q: dict, job: str) -> None:
 
 
 def _deliver(q: dict) -> list[str]:
-    """Los videos del lote, juntos a Descargas (sin pisar nada que ya esté ahí)."""
-    dl = Path.home() / "Downloads"
+    """Los videos del lote, juntos a Descargas (o cada uno a su carpeta, con carpeta de mis videos), sin pisar nada."""
     out = []
     for f in sorted(Path(q["entrega"]).glob("*.mp4")):
+        job = f.name[:-len(".final.mp4")] if f.name.endswith(".final.mp4") else ""
+        dl = export_dir(job) if job and (PROJECTS / job).is_dir() else Path.home() / "Downloads"
         dest, n = dl / f.name, 2
         while dest.exists():
             dest, n = dl / f"{f.stem} ({n}){f.suffix}", n + 1
@@ -1666,7 +1933,8 @@ def queue_tick() -> None:
             if not act:
                 q["entregados"] = _deliver(q)
                 q["fase"], q["fin"] = "terminado", time.time()
-                notify("Iconic Studio", f"¡Listos tus {len(q['jobs'])} videos! Están en Descargas.")
+                notify("Iconic Studio", f"¡Listos tus {len(q['jobs'])} videos! "
+                       + ("Cada uno está en su carpeta." if espacio() else "Están en Descargas."))
             _queue_save(q)
 
 
@@ -1996,7 +2264,7 @@ def promote_final(t: Task, job: str) -> int:
             return code
     else:
         shutil.copy2(base, final)
-    dl = Path.home() / "Downloads" / f"{job}.final.mp4"
+    dl = export_dir(job) / f"{job}.final.mp4"
     shutil.copy2(final, dl)
     t.say(f"  ✓ video final: {final}")
     t.say(f"  ✓ copia lista para subir: {dl}")
@@ -2086,6 +2354,10 @@ class Handler(BaseHTTPRequestHandler):
                                "claude": bool(find_claude()), "instalacion": setup_state()})
         if parts[:2] == ["api", "reglas"]:
             return self._json({"reglas": read_rules()})
+        if parts[:2] == ["api", "espacio"]:
+            root = espacio()
+            return self._json({"espacio": str(root) if root else "", "elegida": str(CFG.get("espacio") or ""),
+                               "sub": [SUB_ASSETS, SUB_VOZ, SUB_RAW, SUB_GUIONES], "sueltos": SUELTOS})
         if parts[:2] == ["api", "grupos"]:
             return self._json({"grupos": read_groups()})
         if parts[:2] == ["api", "cuenta"]:
@@ -2139,8 +2411,29 @@ class Handler(BaseHTTPRequestHandler):
             clean = [{"id": str(g.get("id") or slugify(g.get("nombre", ""))), "nombre": str(g.get("nombre", "")).strip()[:40],
                       "color": str(g.get("color", "#6c8cff"))[:9], "emoji": str(g.get("emoji", "📁"))[:4]}
                      for g in body.get("grupos", []) if str(g.get("nombre", "")).strip()]
+            antes = {g.get("id") for g in read_groups()}
             write_json(GROUPS_FILE, clean)
+            if espacio():
+                m = _espacio_map()
+                for gid in antes - {g["id"] for g in clean}:  # carpeta borrada en la app: su carpeta de Windows queda
+                    forget_folder(m["grupos"].get(gid, ""))
+                for g in clean:
+                    try:
+                        campaign_dir(g["id"])
+                    except OSError:
+                        pass
             return self._json({"grupos": clean})
+        if parts[:2] == ["api", "espacio"]:
+            if len(parts) == 3 and parts[2] == "revisar":
+                return self._json(revisar_espacio())
+            if len(parts) == 3 and parts[2] == "abrir":
+                d = (video_dir(str(body["job"])) if body.get("job") else campaign_dir(str(body["grupo"])) if body.get("grupo")
+                     else espacio())
+                if not d:
+                    raise ValueError("no hay carpeta de mis videos")
+                open_path(d)
+                return self._json({"ok": True})
+            return self._json(set_espacio(str(body.get("ruta", ""))))
         if parts[:2] == ["api", "instrucciones"] and len(parts) == 4 and parts[2] in ASSET_SCOPES:
             return self._json({"texto": save_instr(parts[2], parts[3], body.get("texto", ""))})
         if parts[:2] == ["api", "assets"] and len(parts) == 4 and parts[2] in ASSET_SCOPES:
@@ -2295,6 +2588,12 @@ class Api:
         exts = ";".join(f"*{e}" for e in sorted(DOC_EXT))
         res = self._window.create_file_dialog(
             webview.OPEN_DIALOG, allow_multiple=False, file_types=(f"Documentos ({exts})", "Todos (*.*)"))
+        return str(res[0]) if res else ""
+
+    def elegir_carpeta(self):
+        """La carpeta de mis videos."""
+        import webview
+        res = self._window.create_file_dialog(getattr(webview, "FOLDER_DIALOG", 20))
         return str(res[0]) if res else ""
 
     def elegir_audio(self):

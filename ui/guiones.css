@@ -7,6 +7,7 @@
 .gu-item details textarea { width: 100%; }
 .gu-item summary { cursor: pointer; line-height: 1.45; }
 .gu-more { color: var(--accent); margin-left: 6px; white-space: nowrap; }
+.gu-docs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 2px 0 6px; }
 .gu-n { font-weight: 700; color: #d97757; min-width: 22px; }
 .gu-file { max-width: 220px; }
 .gu-path { flex: 1; min-width: 0; }

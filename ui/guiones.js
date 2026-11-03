@@ -22,6 +22,7 @@ async function openGuiones(gid, archivo) {
 }
 function closeGuiones() { $("#modal-guiones").classList.add("hidden"); clearInterval(guPoll); guPoll = null; }
 function applyGuionesStatus(d) {
+  if (d.documentos) GU.docs = d.documentos;  // los de la carpeta «guiones» de la campaña (carpeta de mis videos)
   if (d.estado === "analizando") { GU.fase = "analizando"; GU.segundos = d.segundos || 0; startGuPoll(); }
   else if (d.estado === "error") { GU.fase = "error"; GU.error = d.error; }
   else if (d.estado === "listo") { GU.fase = "revisar"; GU.data = d; GU.data.guardar = true; }
@@ -47,8 +48,10 @@ function renderGuiones() {
       cada video lee solo su guion y gasta menos.</p>`;
   let body = "";
   if (GU.fase === "subir") {
-    const name = GU.archivo ? baseName(GU.archivo) : "";
+    const name = GU.archivo ? baseName(GU.archivo) : "", docs = (GU.docs || []).filter((p) => p !== GU.archivo);
     body = `<label>1. El documento con los guiones <span class="muted">(Word .docx, PDF o .txt; de Google Docs: Archivo → Descargar → .docx)</span></label>
+      ${docs.length ? `<div class="gu-docs"><span class="muted small">En la carpeta «guiones» de la campaña:</span>
+        ${docs.map((p) => `<button class="chip" title="${esc(p)}" onclick="GU.archivo=this.title;renderGuiones()">📄 ${esc(baseName(p))}</button>`).join("")}</div>` : ""}
       <div class="row">
         <button class="btn primary" onclick="pickGuionesDoc()">${ico("plus")} Elegir documento…</button>
         ${name ? `<span class="file grow"><span class="file-n">📄</span><span class="grow ellipsis" title="${esc(GU.archivo)}">${esc(name)}</span>

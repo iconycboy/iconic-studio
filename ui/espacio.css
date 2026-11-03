@@ -1,0 +1,6 @@
+/* Iconic Studio — carpeta de mis videos (espacio.js) */
+.esp-tree { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r, 8px); padding: 10px 12px;
+  font-size: 12px; line-height: 1.55; overflow-x: auto; margin: 4px 0; color: var(--text); }
+.esp-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; margin: -2px 0 12px; }
+.esp-line a { color: var(--accent); word-break: break-all; }
+#card-carpeta p { margin: 4px 0; }

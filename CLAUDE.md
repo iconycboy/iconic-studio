@@ -9,7 +9,10 @@ la carpeta de al lado. Habla con el usuario en español sencillo.
   Pruebas: `uv run app.py --serve 8765` y abrir http://127.0.0.1:8765/.
 - `ui/` — `index.html`, `style.css`, `app.js` son la base; cada archivo encima (`tema.js`, `assets.js`, `lote.js`,
   `instrucciones.js`, `menu.js`, `cuenta.js`, `carpetas.js`, `bienvenida.js`, `arrastrar.js`, `actualizar.js`, `cola.js` (lotes en fila, modo Rápido/Completo, modelo, avance de Claude desde RUN.md, estilo de carpeta), `comentar.js`, `material.js`, `guiones.js` (campañas con guiones: Claude separa el documento con `claude -p`, un video
-  vacío por guion con `state.json → guion`; subir grabaciones de a varias; voz en off por video))
+  vacío por guion con `state.json → guion`; subir grabaciones de a varias; voz en off por video), `espacio.js`
+  (opcional: «carpeta de mis videos» en Windows, config `espacio`; una carpeta por campaña con `guiones` y `assets`,
+  una por video con `assets`, `voice en off` y `raw vid`; `revisar_espacio` mete lo nuevo y el video terminado queda
+  ahí en vez de Descargas; mapa en `projects/_grupos/carpetas.json`))
   agrega una función envolviendo las de antes, y se cargan en ese orden.
 - `construir/` — `lanzador.py` (el .exe de PyInstaller: Python + pywebview, que corre el `app.py` suelto de al lado),
   `instalador.iss` (Inno Setup), `publicar.py`, `editor.json` (local, ver `editor.ejemplo.json`), `mac.sh` (la .app
