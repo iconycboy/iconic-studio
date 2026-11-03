@@ -1,0 +1,22 @@
+/* Iconic Studio — preparar videos con guiones (guiones.js) */
+.gu-list { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow: auto; margin: 6px 0; }
+.gu-item { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r, 8px); padding: 8px 10px; }
+.gu-item.off { opacity: .5; }
+.gu-item .row input.grow { min-width: 0; }
+.gu-item details { margin-top: 6px; }
+.gu-item details textarea { width: 100%; }
+.gu-item summary { cursor: pointer; line-height: 1.45; }
+.gu-more { color: var(--accent); margin-left: 6px; white-space: nowrap; }
+.gu-n { font-weight: 700; color: #d97757; min-width: 22px; }
+.gu-file { max-width: 220px; }
+.gu-path { flex: 1; min-width: 0; }
+.gu-check { align-items: flex-start; margin-top: 12px !important; padding: 10px 12px; border: 1px dashed var(--line);
+  border-radius: var(--r, 8px); }
+.gu-check input { margin-top: 3px; }
+#card-guion textarea { width: 100%; }
+#card-guion label { display: block; margin-top: 8px; color: var(--muted); }
+.gu-upload { border-style: dashed; border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.card .gu-tag { display: inline-block; margin-bottom: 4px; font-size: 11px; }
+.card.gu-slot .thumb { position: relative; }
+.gu-falta { position: absolute; left: 8px; right: 8px; bottom: 8px; text-align: center; font-size: 12px; font-weight: 600;
+  background: #000a; color: #fff; border-radius: 6px; padding: 4px 6px; }

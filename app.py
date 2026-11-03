@@ -278,6 +278,7 @@ def project_summary(job: str) -> dict:
         "assets": len(read_assets("video", job)),
         "lote": st.get("lote"),
         "instrucciones": st.get("instrucciones", ""),
+        "guion": st.get("guion"),
         "duracion": video_duration(job),
         "estimado": estimates(job),
     }
@@ -348,6 +349,8 @@ def save_assets(scope: str, ident: str, items: list[dict]) -> list[dict]:
         tipo = str(a.get("tipo", ""))
         item = {"id": str(a.get("id") or os.urandom(4).hex())[:16], "tipo": tipo,
                 "uso": str(a.get("uso", "")).strip()[:600], "obligatorio": bool(a.get("obligatorio", True))}
+        if a.get("voz") and tipo == "audio":  # la voz en off de un guion
+            item["voz"] = True
         if tipo == "texto":
             item["texto"] = str(a.get("texto", "")).strip()[:2000]
             if not item["texto"]:
@@ -359,7 +362,8 @@ def save_assets(scope: str, ident: str, items: list[dict]) -> list[dict]:
             item["archivo"] = name
             item["nombre"] = str(a.get("nombre") or name)[:120]
         clean.append(item)
-    keep = {a["archivo"] for a in clean if "archivo" in a} | {"assets.json", "ASSETS.md", "instrucciones.md", STYLE_FILE}
+    keep = {a["archivo"] for a in clean if "archivo" in a} | {"assets.json", "ASSETS.md", "instrucciones.md", STYLE_FILE,
+                                                               "guiones.json"} | {f.name for f in d.glob("guiones-original.*")}
     for f in d.iterdir():
         if f.is_file() and f.name not in keep:
             f.unlink()  # es la copia de la app; el archivo original sigue donde estaba
@@ -545,12 +549,17 @@ def create_projects(sources: list[str], titulo: str, idioma: str, grupo: str = "
         save_state(job, {"titulo": name, "idioma": idioma, "notas": "", "grupo": grupo,
                          "creado": datetime.now().isoformat(timespec="seconds"), "pasos": {}, "origen": [src]})
         jobs.append((job, src))
+    import_in_line([(j, [s]) for j, s in jobs])
+    return {"jobs": [j for j, _ in jobs]}
 
+
+def import_in_line(pairs: list[tuple[str, list[str]]]) -> None:
+    """Copia los videos de varios proyectos de a uno, en fila, porque la app trabaja un paso a la vez."""
     def queue():
-        for job, src in jobs:
+        for job, srcs in pairs:
             while True:
                 try:
-                    TASK.start(job, "importar", [["py", lambda t, j=job, s=src: copy_parts(t, j, [s])], ["proxy"]])
+                    TASK.start(job, "importar", [["py", lambda t, j=job, s=srcs: copy_parts(t, j, s)], ["proxy"]])
                     break
                 except RuntimeError:  # hay otro paso trabajando: espera su turno
                     time.sleep(1)
@@ -558,7 +567,238 @@ def create_projects(sources: list[str], titulo: str, idioma: str, grupo: str = "
                 time.sleep(1)
 
     threading.Thread(target=queue, daemon=True).start()
-    return {"jobs": [j for j, _ in jobs]}
+
+
+# --------------------------------------------------------------------------- guiones de una campaña
+# Campañas que ya traen los guiones (un .docx, .pdf, .txt o el texto pegado): Claude lee el documento UNA vez y lo
+# separa, un guion por video; la app crea un video vacío por guion en la carpeta (con su hook, su guion y sus notas)
+# y solo falta subir la grabación. Así cada edición lee solo su guion, no el documento entero. Lo separado queda en
+# projects/_grupos/<id>/guiones.json hasta que se crean los videos.
+
+DOC_EXT = {".docx", ".pdf", ".txt", ".md"}
+_guiones_lock = threading.Lock()
+GUIONES_RUN: dict[str, dict] = {}  # carpeta → {"estado": "analizando" | "error", "error": ""} mientras Claude lee
+
+
+def doc_text(p: Path) -> str:
+    """El texto de un .docx/.txt/.md (un .pdf lo lee Claude directo). En un .docx las tablas salen fila por fila."""
+    ext = p.suffix.lower()
+    if ext in (".txt", ".md"):
+        return p.read_text(encoding="utf-8", errors="replace")
+    if ext != ".docx":
+        return ""
+    import zipfile
+    import xml.etree.ElementTree as ET
+    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    with zipfile.ZipFile(p) as z:
+        body = ET.fromstring(z.read("word/document.xml")).find(f"{w}body")
+    para = lambda el: "".join(t.text or "" for t in el.iter(f"{w}t"))  # noqa: E731
+    lines = []
+    for el in body if body is not None else []:
+        if el.tag == f"{w}p":
+            lines.append(para(el))
+        elif el.tag == f"{w}tbl":
+            for row in el.iter(f"{w}tr"):
+                cells = [" / ".join(para(p) for p in c.iter(f"{w}p")).strip() for c in row.iter(f"{w}tc")]
+                lines.append(" | ".join(c for c in cells if c))
+    return "\n".join(lines)
+
+
+def guiones_file(gid: str) -> Path:
+    return assets_dir("grupo", gid) / "guiones.json"
+
+
+def clean_guion(g: dict) -> dict:
+    hooks = g.get("hooks") or []
+    if isinstance(hooks, str):
+        hooks = [hooks]
+    return {"numero": str(g.get("numero", "")).strip()[:10], "titulo": str(g.get("titulo", "")).strip()[:80],
+            "hooks": [str(h).strip()[:600] for h in hooks if str(h).strip()][:6],
+            "guion": str(g.get("guion", "")).strip()[:8000], "voz_en_off": str(g.get("voz_en_off", "")).strip()[:3000],
+            "notas": str(g.get("notas", "")).strip()[:2000]}
+
+
+GUIONES_PEDIDO = """Te escribe la app Iconic Studio de parte de {u}, que graba videos para redes (UGC). Abajo va el documento \
+de una campaña: un brief y/o los guiones de varios videos. Sepáralo en videos, uno por guion, para que {u} grabe cada uno \
+y otra sesión de Claude lo edite leyendo SOLO su guion.
+
+Responde SOLO con un JSON válido (sin texto antes ni después, sin ```), con esta forma:
+{{"campana": "nombre de la campaña o marca",
+ "general": "lo que vale para TODOS los videos, en frases cortas: marca y cómo se escribe, tono, menciones o textos \
+obligatorios, código o link, llamada a la acción, hashtags, lo que NO se puede decir, duración o formato. Vacío si no hay.",
+ "videos": [{{"numero": "1", "titulo": "título corto de 2 a 6 palabras",
+   "hooks": ["el hook o gancho EXACTO; si trae varios hooks alternativos para el mismo guion, todos aquí"],
+   "guion": "lo que se dice a cámara, EXACTO, completo, con sus saltos de línea",
+   "voz_en_off": "el texto que va como voz en off, si el guion lo marca; vacío si no",
+   "notas": "indicaciones de ESTE video: tomas, b-roll, textos en pantalla, producto, duración. Vacío si no hay."}}]}}
+
+Reglas: copia los textos tal cual (sin resumir, corregir ni traducir). Respeta el orden y la numeración del documento. \
+Varios hooks para un mismo guion son UN video (salvo que el documento diga que son videos distintos). Si el documento \
+no trae guiones separados sino ideas o temas, haz un video por tema con lo que diga de cada uno. No inventes nada.
+"""
+
+
+def split_guiones(gid: str, texto: str = "", archivo: str = "") -> None:
+    """Le pide a Claude (sin ventana, con la cuenta de esta PC) que separe los guiones; corre aparte y deja el
+    resultado en guiones.json. La app pregunta por /api/grupo/<id>/guiones hasta que termina."""
+    exe = find_claude()
+    if not exe:
+        raise RuntimeError(CLAUDE_FALTA)
+    d = assets_dir("grupo", gid)
+    d.mkdir(parents=True, exist_ok=True)
+    doc = ""
+    if archivo:
+        s = Path(str(archivo).strip().strip('"'))
+        if not s.is_file() or s.suffix.lower() not in DOC_EXT:
+            raise ValueError("elige un documento .docx, .pdf o .txt (de Google Docs: Archivo → Descargar → .docx)")
+        for old in d.glob("guiones-original.*"):
+            old.unlink()
+        copy = d / f"guiones-original{s.suffix.lower()}"
+        shutil.copy2(s, copy)  # copiar, nunca mover
+        texto = doc_text(copy)
+        if not texto.strip():
+            doc = copy.relative_to(EDITOR).as_posix()  # un .pdf (o un .docx sin texto): que lo lea Claude
+    if not texto.strip() and not doc:
+        raise ValueError("el documento está vacío: pega el texto de los guiones o elige otro archivo")
+    with _guiones_lock:
+        if GUIONES_RUN.get(gid, {}).get("estado") == "analizando":
+            raise RuntimeError("Claude ya está leyendo los guiones de esta carpeta; espera un momento")
+        GUIONES_RUN[gid] = {"estado": "analizando", "error": "", "inicio": time.time()}
+    pedido = GUIONES_PEDIDO.format(u=USUARIO) + (
+        f"\nEl documento es el archivo {doc} (léelo entero con la herramienta Read).\n" if doc
+        else f"\nEL DOCUMENTO:\n<<<\n{texto.strip()[:120000]}\n>>>\n")
+
+    def work():
+        try:
+            out = subprocess.run([exe, "-p", "--output-format", "json", "--model", "sonnet", "--allowedTools", "Read"],
+                                 input=pedido, cwd=EDITOR, env=claude_env(), capture_output=True, text=True,
+                                 encoding="utf-8", errors="replace", timeout=900, creationflags=NO_WINDOW)
+            res = json.loads(out.stdout or "{}")
+            if res.get("is_error") or out.returncode != 0:
+                raise RuntimeError(str(res.get("result") or out.stderr or "Claude no pudo leer el documento").strip()[-300:])
+            raw = str(res.get("result", ""))
+            data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+            videos = [clean_guion(v) for v in data.get("videos", []) if isinstance(v, dict)]
+            videos = [v for v in videos if v["guion"] or v["hooks"] or v["voz_en_off"]]
+            if not videos:
+                raise RuntimeError("Claude no encontró guiones en el documento")
+            for i, v in enumerate(videos, 1):
+                v["numero"] = v["numero"] or str(i)
+                v["titulo"] = v["titulo"] or f"Video {v['numero']}"
+            write_json(guiones_file(gid), {"campana": str(data.get("campana", "")).strip()[:80],
+                                           "general": str(data.get("general", "")).strip()[:4000],
+                                           "videos": videos, "fecha": datetime.now().isoformat(timespec="seconds")})
+            GUIONES_RUN.pop(gid, None)
+        except Exception as e:  # noqa: BLE001
+            msg = "Claude tardó demasiado" if isinstance(e, subprocess.TimeoutExpired) else str(e)
+            GUIONES_RUN[gid] = {"estado": "error", "error": msg}
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def guiones_status(gid: str) -> dict:
+    run = GUIONES_RUN.get(gid)
+    if run:
+        return {**run, "segundos": round(time.time() - run.get("inicio", time.time()))}
+    data = read_json(guiones_file(gid), None)
+    return {"estado": "listo", **data} if data else {"estado": "nada"}
+
+
+def create_slots(gid: str, videos: list[dict], idioma: str, general: str = "", guardar_general: bool = False) -> dict:
+    """Un video vacío por guion, en la carpeta: tiene su guion pero todavía no su grabación."""
+    if not any(g.get("id") == gid for g in read_groups()):
+        raise ValueError("esa carpeta ya no existe")
+    videos = [clean_guion(v) for v in videos if isinstance(v, dict)]
+    if not videos:
+        raise ValueError("elige al menos un guion")
+    now = datetime.now()
+    jobs = []
+    for i, v in enumerate(videos):
+        name = f"{v['numero']}. {v['titulo']}" if v["numero"] else v["titulo"]
+        base = slugify(f"{group_name(gid)} {name}")
+        job, n = base, 2
+        while (PROJECTS / job).exists():
+            job, n = f"{base}-{n}", n + 1
+        for sub in ("raw", "audio", "assets", "broll", "outputs", "transcript", "studio"):
+            (PROJECTS / job / sub).mkdir(parents=True, exist_ok=True)
+        # la lista va de más nuevo a más viejo: el guion 1 queda «más nuevo» para que salga primero
+        creado = datetime.fromtimestamp(now.timestamp() + len(videos) - i).isoformat(timespec="seconds")
+        save_state(job, {"titulo": name, "idioma": idioma, "notas": "", "grupo": gid, "creado": creado,
+                         "pasos": {}, "origen": [], "guion": v})
+        jobs.append(job)
+    general = str(general).strip()
+    if guardar_general and general:
+        prev = read_instr("grupo", gid)
+        if general not in prev:
+            save_instr("grupo", gid, (prev + "\n\n" if prev else "") + general)
+    guiones_file(gid).unlink(missing_ok=True)  # ya están en sus videos
+    return {"jobs": jobs}
+
+
+def upload_recordings(asignar: dict) -> dict:
+    """La grabación de cada video de una campaña (varios a la vez): se copian en fila."""
+    pairs = []
+    for job, srcs in asignar.items():
+        job_dir(job)
+        srcs = check_sources([str(s) for s in (srcs if isinstance(srcs, list) else [srcs])])
+        st = state_of(job)
+        st["origen"] = [o for o in (st.get("origen") or []) if o] + srcs
+        save_state(job, st)
+        pairs.append((job, srcs))
+    if not pairs:
+        raise ValueError("elige al menos un video")
+    import_in_line(pairs)
+    return {"ok": True, "videos": len(pairs)}
+
+
+VOZ_USO = "VOZ EN OFF: va encima del video donde el guion la marca (si no lo marca, donde mejor encaje)"
+
+
+def add_voiceover(job: str, sources: list[str]) -> list[dict]:
+    for s in sources:
+        if ASSET_KIND.get(Path(str(s).strip().strip('"')).suffix.lower()) != "audio":
+            raise ValueError(f"«{Path(str(s)).name}» no es un audio (.mp3, .wav, .m4a…)")
+    before = {a.get("archivo") for a in read_assets("video", job)}
+    items = add_asset_files("video", job, sources)
+    for a in items:
+        if a.get("archivo") not in before:
+            a["uso"], a["voz"] = VOZ_USO, True
+    return save_assets("video", job, items)
+
+
+def guion_for_claude(job: str) -> str:
+    st = state_of(job)
+    g = st.get("guion")
+    if not g:
+        return ""
+    gid = st.get("grupo", "")
+    voz = [a for a in read_assets("video", job) if a.get("voz")]
+    txt = (f"GUION DE ESTE VIDEO (guion {g.get('numero') or ''} de la campaña"
+           f"{' «' + group_name(gid) + '»' if gid else ''}; la app ya lo separó del documento, no hace falta buscarlo):\n")
+    hooks = g.get("hooks") or []
+    if hooks:
+        txt += ("Hook: «" + hooks[0] + "»\n" if len(hooks) == 1
+                else "Hooks (variantes):\n" + "\n".join(f"- «{h}»" for h in hooks) + "\n")
+    if g.get("guion"):
+        txt += f"Guion (lo que {USUARIO} tenía que decir a cámara):\n«{g['guion']}»\n"
+    if g.get("voz_en_off"):
+        txt += f"Voz en off del guion:\n«{g['voz_en_off']}»\n"
+    if g.get("notas"):
+        txt += f"Indicaciones del guion: {g['notas']}\n"
+    txt += (
+        "Cómo usarlo: el guion es la referencia para cortar, así no hace falta adivinar qué va. Compara la "
+        "transcripción con él: de cada frase quédate con la mejor toma (normalmente la última completa), quita lo que no "
+        "está en el guion (errores, repeticiones, comentarios fuera de cámara) y respeta su orden. No cambies lo que dijo: "
+        "si improvisó algo que suma, déjalo. Usa el guion para escribir bien en los subtítulos los nombres de marca y "
+        "términos. Si el preset lleva gancho en pantalla, usa el hook del guion (con varios: el que dijo en la grabación, "
+        f"o el primero). Si falta una parte del guion en la grabación, díselo a {USUARIO} antes de exportar.\n")
+    if voz:
+        txt += ("Voz en off grabada aparte (assets de audio marcados VOZ EN OFF): " + ", ".join(a["archivo"] for a in voz)
+                + ". Ponla donde el guion la marca, baja el audio de la cámara mientras suena y súmala a los subtítulos.\n")
+    elif g.get("voz_en_off"):
+        txt += (f"El guion lleva voz en off pero {USUARIO} todavía no subió su audio: si en la grabación no está, "
+                "pregúntale antes de inventarla.\n")
+    return txt
 
 
 def delete_project(job: str) -> dict:
@@ -1222,6 +1462,9 @@ def claude_prompt(job: str, modo: str, texto: str) -> str:
         "Sus subtítulos son hf-graphics/captions/renders/captions-alpha.mov.\n"
         f"Recuerda: {USUARIO} no es de perfil técnico. Háblale en español sencillo, frases cortas, sin comandos ni rutas.\n\n"
     )
+    guion = guion_for_claude(job)
+    if guion:
+        ctx += guion + "\n"
     kit = assets_for_claude(job)
     if kit:
         ctx += kit + "\n"
@@ -1851,6 +2094,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(queue_status())
         if parts[:2] == ["api", "grupo"] and len(parts) == 4 and parts[3] == "estilo":
             return self._json(style_info(parts[2]))
+        if parts[:2] == ["api", "grupo"] and len(parts) == 4 and parts[3] == "guiones":
+            return self._json(guiones_status(parts[2]))
         if parts[:2] == ["api", "instalacion"]:
             return self._json({**setup_state(), "usuario": USUARIO, "claude": bool(find_claude())})
         if parts[:2] == ["api", "actualizacion"]:
@@ -1931,6 +2176,20 @@ class Handler(BaseHTTPRequestHandler):
         if parts[:2] == ["api", "grupo"] and len(parts) == 4 and parts[3] == "aprender":
             learn_style(parts[2])
             return self._json({"ok": True})
+        if parts[:2] == ["api", "grupo"] and len(parts) == 4 and parts[3] == "guiones":
+            gid = parts[2]
+            if body.get("crear"):
+                return self._json(create_slots(gid, list(body.get("videos", [])), str(body.get("idioma", CFG["idioma"])),
+                                               str(body.get("general", "")), bool(body.get("guardar_general"))))
+            if body.get("descartar"):
+                assets_dir("grupo", gid)  # comprueba el id
+                guiones_file(gid).unlink(missing_ok=True)
+                GUIONES_RUN.pop(gid, None)
+                return self._json({"estado": "nada"})
+            split_guiones(gid, str(body.get("texto", "")), str(body.get("archivo", "")))
+            return self._json(guiones_status(gid))
+        if parts[:2] == ["api", "grabaciones"]:
+            return self._json(upload_recordings(dict(body.get("asignar", {}))))
         if parts[:2] == ["api", "lote"]:
             start_queue([str(j) for j in body.get("jobs", [])], str(body.get("instrucciones", "")),
                         str(body.get("modo", "completo")), str(body.get("modelo", "")), int(body.get("paralelo") or 1))
@@ -1950,6 +2209,8 @@ class Handler(BaseHTTPRequestHandler):
                 for k in ("titulo", "notas", "idioma", "grupo"):
                     if k in body:
                         st[k] = body[k]
+                if isinstance(body.get("guion"), dict):
+                    st["guion"] = clean_guion(body["guion"])
                 save_state(job, st)
                 return self._json(project_summary(job))
             if action == "edits":
@@ -1973,6 +2234,8 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     edit_parts(job, body.get("orden"), body.get("quitar"))
                 return self._json({"ok": True})
+            if action == "voz":
+                return self._json({"assets": add_voiceover(job, [str(s) for s in body.get("agregar", [])])})
             if action == "comentarios":
                 if body.get("enviar"):
                     send_comments(job)
@@ -2024,6 +2287,22 @@ class Api:
         res = self._window.create_file_dialog(
             webview.OPEN_DIALOG, allow_multiple=True,
             file_types=(f"Fotos videos audio y letras ({exts})", "Todos (*.*)"))
+        return list(res) if res else []
+
+    def elegir_documento(self):
+        """El documento con los guiones de una campaña."""
+        import webview
+        exts = ";".join(f"*{e}" for e in sorted(DOC_EXT))
+        res = self._window.create_file_dialog(
+            webview.OPEN_DIALOG, allow_multiple=False, file_types=(f"Documentos ({exts})", "Todos (*.*)"))
+        return str(res[0]) if res else ""
+
+    def elegir_audio(self):
+        """La voz en off de un video."""
+        import webview
+        exts = ";".join(f"*{e}" for e, k in ASSET_KIND.items() if k == "audio")
+        res = self._window.create_file_dialog(
+            webview.OPEN_DIALOG, allow_multiple=True, file_types=(f"Audio ({exts})", "Todos (*.*)"))
         return list(res) if res else []
 
 
