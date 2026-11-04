@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.6.0"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.7.0"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
@@ -778,8 +778,9 @@ def guion_for_claude(job: str) -> str:
         return ""
     gid = st.get("grupo", "")
     voz = [a for a in read_assets("video", job) if a.get("voz")]
-    txt = (f"GUION DE ESTE VIDEO (guion {g.get('numero') or ''} de la campaña"
-           f"{' «' + group_name(gid) + '»' if gid else ''}; la app ya lo separó del documento, no hace falta buscarlo):\n")
+    txt = (f"GUION DE ESTE VIDEO (guion {g.get('numero')} de la campaña"
+           f"{' «' + group_name(gid) + '»' if gid else ''}; la app ya lo separó del documento, no hace falta buscarlo):\n"
+           if g.get("numero") else f"GUION DE ESTE VIDEO (lo subió {USUARIO}; no hace falta buscarlo):\n")
     hooks = g.get("hooks") or []
     if hooks:
         txt += ("Hook: «" + hooks[0] + "»\n" if len(hooks) == 1
@@ -804,6 +805,40 @@ def guion_for_claude(job: str) -> str:
         txt += (f"El guion lleva voz en off pero {USUARIO} todavía no subió su audio: si en la grabación no está, "
                 "pregúntale antes de inventarla.\n")
     return txt
+
+
+def set_guion(job: str, archivo: str = "", texto: str = "") -> dict:
+    """El guion de UN video, de un .docx/.txt o del texto pegado: va tal cual (sin pasar por Claude, no gasta nada).
+    Si el video ya tenía guion, se reemplaza solo el texto; su hook, voz en off y notas quedan."""
+    st = state_of(job)
+    if archivo:
+        s = Path(str(archivo).strip().strip('"'))
+        if not s.is_file() or s.suffix.lower() not in DOC_EXT:
+            raise ValueError("elige un documento .docx o .txt (de Google Docs: Archivo → Descargar → .docx)")
+        texto = doc_text(s)
+        if not texto.strip():
+            raise ValueError("no pude leer el texto de ese documento: guárdalo como .docx o .txt, o pega el texto")
+        d = studio_dir(job)
+        for old in d.glob("guion-original.*"):
+            old.unlink()
+        shutil.copy2(s, d / f"guion-original{s.suffix.lower()}")  # copiar, nunca mover
+        st["guion_origen"] = str(s)
+    texto = str(texto).strip()
+    if not texto:
+        raise ValueError("el guion está vacío: elige el documento o pega el texto")
+    g = dict(st.get("guion") or {})
+    g["guion"] = texto
+    st["guion"] = clean_guion(g)
+    st["guion_mtime"] = time.time()  # un documento en su carpeta de Windows solo entra si es más nuevo
+    save_state(job, st)
+    try:  # que se lea también en su carpeta de Windows mientras grabas
+        vd = video_dir(job, crear=False)
+        if vd and vd.is_dir():
+            (vd / "guion.txt").unlink(missing_ok=True)
+            video_dir(job)
+    except OSError:
+        pass
+    return project_summary(job)
 
 
 def new_empty_job(titulo: str, gid: str, idioma: str, creado: str = "", **extra) -> str:
@@ -1040,6 +1075,16 @@ def revisar_espacio() -> dict:
                     save_state(j, st)
                     hechos.append(f"hay grabaciones nuevas en «raw vid» de «{st['titulo']}», pero ya tiene su video: "
                                   "si son otra parte, agrégalas desde el video")
+            # un .docx/.txt suelto en la carpeta del video es su guion (no el guion.txt que escribe la app)
+            docs = [f for f in d.iterdir() if f.is_file() and f.suffix.lower() in (".docx", ".txt", ".md")
+                    and not f.name.startswith(("~$", ".")) and f.name.lower() != "guion.txt"] if d.is_dir() else []
+            doc = max(docs, key=lambda f: f.stat().st_mtime) if docs else None
+            if doc and doc.stat().st_mtime > st.get("guion_mtime", 0):  # uno nuevo, o lo cambiaste
+                try:
+                    set_guion(j, str(doc))
+                    hechos.append(f"el guion de «{st['titulo']}»")
+                except (ValueError, OSError):
+                    pass
             voz = _new_files(d / SUB_VOZ, _known_assets("video", j), {"audio"})
             if voz:
                 add_voiceover(j, voz)
@@ -2488,7 +2533,18 @@ class Handler(BaseHTTPRequestHandler):
                         str(body.get("modo", "completo")), str(body.get("modelo", "")), int(body.get("paralelo") or 1))
             return self._json({"ok": True})
         if parts[:2] == ["api", "projects"]:
-            origen = body.get("origenes") or [body.get("origen", "")]
+            origen = [o for o in (body.get("origenes") or [body.get("origen", "")]) if str(o).strip()]
+            if not origen:  # preparar el video sin la grabación todavía (su guion, assets, voz en off…)
+                titulo = str(body.get("titulo", "")).strip()
+                if not titulo:
+                    raise ValueError("ponle un nombre al video")
+                job = new_empty_job(titulo[:80], str(body.get("grupo", "")), str(body.get("idioma", CFG["idioma"])))
+                if body.get("guion_archivo") or str(body.get("guion_texto", "")).strip():
+                    try:
+                        set_guion(job, str(body.get("guion_archivo", "")), str(body.get("guion_texto", "")))
+                    except ValueError as e:
+                        return self._json({"job": job, "aviso": str(e)})
+                return self._json({"job": job})
             if body.get("separados") and len(origen) > 1:
                 return self._json(create_projects([str(o) for o in origen], body.get("titulo", "").strip(),
                                                   body.get("idioma", CFG["idioma"]), str(body.get("grupo", ""))))
@@ -2527,6 +2583,8 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     edit_parts(job, body.get("orden"), body.get("quitar"))
                 return self._json({"ok": True})
+            if action == "guion":
+                return self._json(set_guion(job, str(body.get("archivo", "")), str(body.get("texto", ""))))
             if action == "voz":
                 return self._json({"assets": add_voiceover(job, [str(s) for s in body.get("agregar", [])])})
             if action == "comentarios":

@@ -110,7 +110,8 @@
   <div class="modal-card">
     <h2>Nuevo video</h2>
     <p class="muted">Elige el video que grabaste. <b>Tu archivo original no se mueve ni se cambia:</b> la app trabaja sobre una copia.</p>
-    <label>1. El video <span class="muted">(si lo grabaste en varios pedazos, elígelos todos)</span></label>
+    <label>1. El video <span class="muted">(si lo grabaste en varios pedazos, elígelos todos; si todavía no lo grabas, déjalo
+      vacío y prepáralo: guion, assets, voz en off…)</span></label>
     <div id="new-files" class="files"></div>
     <div class="row">
       <button class="btn primary" onclick="pickVideo()"><i data-i="plus"></i> Elegir video(s)…</button>
@@ -128,6 +129,7 @@
       <option value="en">Inglés</option>
       <option value="pt">Portugués</option>
     </select>
+    <div id="new-guion"></div>
     <div class="row end" style="margin-top:12px">
       <button class="btn ghost" onclick="closeNew()">Cancelar</button>
       <button class="btn primary big" onclick="createProject()">Crear</button>
@@ -201,6 +203,7 @@
 <script src="/ui/comentar.js"></script>
 <script src="/ui/material.js"></script>
 <script src="/ui/guiones.js"></script>
+<script src="/ui/guion.js"></script>
 <script src="/ui/espacio.js"></script>
 </body>
 </html>

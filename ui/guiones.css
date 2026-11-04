@@ -21,3 +21,8 @@
 .card.gu-slot .thumb { position: relative; }
 .gu-falta { position: absolute; left: 8px; right: 8px; bottom: 8px; text-align: center; font-size: 12px; font-weight: 600;
   background: #000a; color: #fff; border-radius: 6px; padding: 4px 6px; }
+.ng-guion { margin-top: 12px; }
+.ng-guion summary { cursor: pointer; font-size: 13px; margin-bottom: 6px; }
+.ng-guion textarea, #card-guion-add textarea { width: 100%; margin-top: 6px; }
+#card-guion-add details { margin-top: 6px; }
+#card-guion-add summary { cursor: pointer; }
