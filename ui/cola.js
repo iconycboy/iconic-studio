@@ -3,7 +3,7 @@
 // aprendido de cada carpeta.
 
 const I = (n) => (typeof ico === "function" ? ico(n) : "");
-const LOTE_OPT = { modo: store("lote-modo") || "completo", modelo: store("lote-modelo") || "sonnet", paralelo: store("lote-paralelo") || "1" };
+const LOTE_OPT = { modo: store("lote-modo") || "completo", modelo: store("lote-modelo") || "sonnet", paralelo: store("lote-paralelo") || "1", solo: store("lote-solo") || "0" };
 
 // ------------------------------------------------------------------ ventana de «editar juntos»: modo y modelo
 const _openLoteQ = openLote;
@@ -14,12 +14,15 @@ openLote = async function () {
   const n = LOTE.sel.size;
   const intro = card.querySelector("h2 + p");
   if (intro) intro.innerHTML = `Claude los edita <b>cada uno en una ventana nueva</b> (uno por uno, o de a dos): así cada video empieza liviano,
-    gasta menos y no se pone lento. Antes, la app transcribe gratis los que falten. <b>Cuando estén los ${n}, aparecen juntos en
+    gasta menos y no se pone lento. <b>Cuando estén los ${n}, aparecen juntos en
     tu carpeta Descargas</b> y te llega un aviso.`;
   const opt = (k, v, t, d) => `<label class="opt ${LOTE_OPT[k] === v ? "on" : ""}"><input type="radio" name="lote-${k}" value="${v}"
       ${LOTE_OPT[k] === v ? "checked" : ""} onchange="LOTE_OPT.${k}='${v}';store('lote-${k}','${v}');this.closest('.opts').querySelectorAll('.opt').forEach(o=>o.classList.toggle('on',o.contains(this)))">
       <b>${t}</b><span class="muted small">${d}</span></label>`;
   card.querySelector(".row.end")?.insertAdjacentHTML("beforebegin", `<div class="lote-opts">
+    <label>Transcripción</label><div class="opts">
+      ${opt("solo", "0", "La app primero", "La app transcribe todos en esta PC antes de abrir a Claude. Claude arranca con eso listo.")}
+      ${opt("solo", "1", "🤖 Todo con Claude", "Sin paso previo: se abre Claude de una y él hace todo en su ventana. Para transcribir usa la herramienta del editor, que también corre en esta PC.")}</div>
     <label>Calidad</label><div class="opts">
       ${opt("modo", "completo", "✨ Completo", "Con gráficos, efectos de sonido y revisión. Como un video normal.")}
       ${opt("modo", "rapido", "⚡ Rápido", "Corte, audio, subtítulos y exportar. Gasta mucho menos: ideal para muchos videos.")}</div>
@@ -32,7 +35,7 @@ openLote = async function () {
 };
 const _apiQ = api;
 api = function (path, body) {  // el modo y el modelo viajan con el pedido del lote
-  if (path === "/api/lote" && body) body = { ...body, modo: LOTE_OPT.modo, modelo: LOTE_OPT.modelo, paralelo: +LOTE_OPT.paralelo || 1 };
+  if (path === "/api/lote" && body) body = { ...body, modo: LOTE_OPT.modo, modelo: LOTE_OPT.modelo, paralelo: +LOTE_OPT.paralelo || 1, solo_claude: LOTE_OPT.solo === "1" };
   const r = _apiQ(path, body);
   if (path === "/api/lote" && body) r.then(() => setTimeout(loadQueue, 500)).catch(() => {});
   return r;
@@ -40,6 +43,7 @@ api = function (path, body) {  // el modo y el modelo viajan con el pedido del l
 
 // ------------------------------------------------------------------ panel de la cola en «Mis videos»
 let QUEUE = null;
+const STOP_BTN = `<button class="btn danger" onclick="event.stopPropagation();queueAction('parar_todo')" title="Cierra las ventanas de Claude del lote, detiene lo que esté trabajando y vacía la cola">⏹ Detener todo</button>`;
 const QSTATE = { listo: "✓ listo", editando: "Claude editando…", transcribiendo: "transcribiendo (gratis)…", "en fila": "en fila" };
 async function loadQueue() {
   try { QUEUE = await api("/api/cola"); } catch (e) { return; }
@@ -53,19 +57,22 @@ function renderQueue() {
   let b = $("#queue-card");
   if (!b) { b = document.createElement("div"); b.id = "queue-card"; $("#view-projects .projects-wrap").prepend(b); }
   const q = QUEUE;
-  if (!q || !q.fase || !q.videos) { b.innerHTML = ""; return; }
+  if (!q || !q.fase || !q.videos) {  // sin lote, pero la app puede estar trabajando (transcribir, importar…)
+    b.innerHTML = q?.tarea ? `<div class="queue"><div class="row"><div class="grow"><b>${q.tarea.deteniendo ? "Deteniendo…" : `${esc(q.tarea.paso)}: ${esc(q.tarea.titulo)}`}</b></div>
+      ${STOP_BTN}</div></div>` : "";
+    return;
+  }
   const n = q.videos.length, done = q.videos.filter((v) => v.estado === "listo").length;
-  const head = { transcribiendo: `${I("film")} Preparando el lote: la app transcribe los videos (gratis)…`,
+  const head = { transcribiendo: q.solo_claude ? `${I("sparkles")} Abriendo a Claude…` : `${I("film")} Preparando el lote: la app transcribe los videos (gratis)…`,
     editando: q.paralelo === 2 ? `${I("sparkles")} Claude está editando 2 videos a la vez · ${done} de ${n} listos`
       : `${I("sparkles")} Claude está editando el video ${q.actual + 1} de ${n}`,
     terminado: `✅ ¡Listos los ${n} videos! Ya están en tu carpeta Descargas.`,
     detenido: `Lote detenido. ${done ? `Los ${done} terminados están en Descargas.` : ""}` }[q.fase] || "";
   b.innerHTML = `<div class="queue ${q.fase}"><div class="row"><div class="grow"><b>${head}</b>
-      <div class="muted small">${q.modo === "rapido" ? "⚡ Rápido" : "✨ Completo"} · Claude ${q.modelo === "opus" ? "máximo" : q.modelo === "sonnet" ? "rápido" : ""}
+      <div class="muted small">${q.solo_claude ? "🤖 Todo con Claude · " : ""}${q.modo === "rapido" ? "⚡ Rápido" : "✨ Completo"} · Claude ${q.modelo === "opus" ? "máximo" : q.modelo === "sonnet" ? "rápido" : ""}
         ${q.fase === "editando" ? "· cada video se abre en su ventana negra; cuando uno termina, la app abre el siguiente sola" : ""}</div></div>
-      ${q.fase === "editando" ? `<button class="btn ghost" onclick="queueAction('siguiente')" title="Si Claude ya terminó este video pero la app no lo notó">Pasar al siguiente</button>
-        <button class="btn ghost danger" onclick="queueAction('detener')">Detener</button>` : ""}
-      ${q.fase === "transcribiendo" ? `<button class="btn ghost danger" onclick="queueAction('detener')">Detener</button>` : ""}
+      ${q.fase === "editando" ? `<button class="btn ghost" onclick="queueAction('siguiente')" title="Si Claude ya terminó este video pero la app no lo notó">Pasar al siguiente</button>${STOP_BTN}` : ""}
+      ${q.fase === "transcribiendo" ? STOP_BTN : ""}
       ${q.fase === "terminado" || q.fase === "detenido" ? `<button class="btn primary" onclick="queueAction('cerrar')">Listo</button>` : ""}</div>
     <div class="qlist">${q.videos.map((v) => `<div class="qitem ${v.estado.replace(" ", "-")}" onclick="openProject('${v.job}')">
       <span class="grow ellipsis">${esc(v.titulo)}</span><span class="muted small">${QSTATE[v.estado] || v.estado}</span>
@@ -73,10 +80,28 @@ function renderQueue() {
       ${bar(v.avance)}</div>`).join("")}</div></div>`;
 }
 async function queueAction(a) {
-  if (a === "detener" && !confirm("¿Detener el lote? Lo que ya esté terminado pasa a Descargas. La ventana de Claude que esté trabajando ciérrala tú.")) return;
-  try { QUEUE = await api("/api/cola", { accion: a }); renderQueue(); } catch (e) { toast(e.message, true); }
+  if (a === "parar_todo" && !confirm("¿Detener todo y vaciar la cola?\n\nSe cierran las ventanas de Claude del lote, se detiene lo que la app esté haciendo y se cancela lo que estaba en fila.\n\nLos videos ya terminados se guardan. Lo que iba a medias queda en su video, sin borrarse.")) return;
+  try {
+    QUEUE = await api("/api/cola", { accion: a });
+    renderQueue();
+    if (a === "parar_todo") {
+      const n = (QUEUE.entregados || []).length;
+      toast(`⏹ Todo detenido y la cola quedó vacía${n ? `. ${n} video${n === 1 ? "" : "s"} terminado${n === 1 ? "" : "s"} guardado${n === 1 ? "" : "s"}` : ""}`);
+      loadProjects();
+      if (curView === "project" && cur) refreshProject();
+    }
+  } catch (e) { toast(e.message, true); }
 }
-setInterval(() => { if (curView === "projects" && !document.hidden) loadQueue(); }, 5000);
+setInterval(() => { if (!document.hidden) loadQueue(); }, 5000);
+// dentro de un video también se puede parar todo: en la barra de abajo
+const _renderQueueS = renderQueue;
+renderQueue = function () {
+  _renderQueueS();
+  const q = QUEUE, on = q && (q.tarea || q.fase === "editando" || q.fase === "transcribiendo"), head = $("#console .console-head");
+  const b = $("#console-stop");
+  if (!on) { b?.remove(); return; }
+  if (!b && head) head.querySelector("span")?.insertAdjacentHTML("afterend", STOP_BTN.replace("<button", '<button id="console-stop"'));
+};
 
 // ------------------------------------------------------------------ el avance de Claude en el inicio de cada video
 const STEP_ICON = { hecho: "✓", saltado: "–", trabajando: "…", esperando: "⏸", pendiente: "" };

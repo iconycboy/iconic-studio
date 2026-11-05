@@ -8,7 +8,7 @@ la carpeta de al lado. Habla con el usuario en español sencillo.
 - `app.py` — servidor local + ventana. `APP_VERSION` arriba. Se corre con `uv run app.py` (o el .exe instalado).
   Pruebas: `uv run app.py --serve 8765` y abrir http://127.0.0.1:8765/.
 - `ui/` — `index.html`, `style.css`, `app.js` son la base; cada archivo encima (`tema.js`, `assets.js`, `lote.js`,
-  `instrucciones.js`, `menu.js`, `cuenta.js`, `carpetas.js`, `bienvenida.js`, `arrastrar.js`, `actualizar.js`, `cola.js` (lotes en fila, modo Rápido/Completo, modelo, avance de Claude desde RUN.md, estilo de carpeta), `comentar.js`, `material.js`, `guiones.js` (campañas con guiones: Claude separa el documento con `claude -p`, un video
+  `instrucciones.js`, `menu.js`, `cuenta.js`, `carpetas.js`, `bienvenida.js`, `arrastrar.js`, `actualizar.js`, `cola.js` (lotes en fila, modo Rápido/Completo, «Todo con Claude» sin transcribir antes, «Detener todo», modelo, avance de Claude desde RUN.md, estilo de carpeta), `comentar.js`, `material.js`, `guiones.js` (campañas con guiones: Claude separa el documento con `claude -p`, un video
   vacío por guion con `state.json → guion`; subir grabaciones de a varias; voz en off por video), `guion.js` (el
   guion de UN video, .docx/.txt o pegado, sin Claude: `set_guion`; «Nuevo video» sin grabación), `espacio.js`
   (opcional: «carpeta de mis videos» en Windows, config `espacio`; una carpeta por campaña con `guiones` y `assets`,

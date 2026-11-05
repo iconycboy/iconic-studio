@@ -23,6 +23,7 @@ import mimetypes
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -34,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.7.0"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.8.0"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
@@ -559,11 +560,18 @@ def create_projects(sources: list[str], titulo: str, idioma: str, grupo: str = "
     return {"jobs": [j for j, _ in jobs]}
 
 
+IMPORT_FILA = {"turno": 0}  # sube con «Detener todo»: las filas de antes ya no siguen
+
+
 def import_in_line(pairs: list[tuple[str, list[str]]]) -> None:
     """Copia los videos de varios proyectos de a uno, en fila, porque la app trabaja un paso a la vez."""
+    turno = IMPORT_FILA["turno"]
+
     def queue():
         for job, srcs in pairs:
             while True:
+                if IMPORT_FILA["turno"] != turno:  # «Detener todo»
+                    return
                 try:
                     TASK.start(job, "importar", [["py", lambda t, j=job, s=srcs: copy_parts(t, j, s)], ["proxy"]])
                     break
@@ -1177,6 +1185,17 @@ def edit_parts(job: str, orden: list[str] | None, quitar: str | None) -> None:
 # --------------------------------------------------------------------------- tareas
 
 
+def kill_tree(pid: int) -> None:
+    """Mata un proceso y todo lo que abrió."""
+    try:
+        if MAC:
+            os.killpg(pid, signal.SIGKILL)
+        else:
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, creationflags=NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 class Task:
     """Una tarea a la vez (el editor también transcribe de a una)."""
 
@@ -1187,6 +1206,8 @@ class Task:
         self.log: list[str] = []
         self.exit = None
         self.started = 0.0
+        self.proc = None
+        self.cancelado = False
 
     def start(self, job: str, step: str, commands: list[list[str]]):
         with self.lock:
@@ -1194,6 +1215,7 @@ class Task:
                 raise RuntimeError(f"ya hay un paso trabajando ({self.step} en {self.job}); espera a que termine")
             self.running, self.job, self.step = True, job, step
             self.log, self.exit, self.started = [], None, time.time()
+            self.cancelado = False
         threading.Thread(target=self._run, args=(job, step, commands), daemon=True).start()
 
     def say(self, line: str):
@@ -1208,21 +1230,38 @@ class Task:
         try:
             for cmd in commands:
                 code = self._exec(job, cmd)
-                if code != 0:
+                if code != 0 or self.cancelado:
                     break
         except Exception as e:  # noqa: BLE001
             self.say(f"✗ {type(e).__name__}: {e}")
             code = 1
+        if self.cancelado:
+            code = 1
         self.exit = code
-        self.say("✓ listo" if code == 0 else f"✗ el paso terminó con error (código {code})")
+        self.say("⏹ detenido" if self.cancelado else "✓ listo" if code == 0 else f"✗ el paso terminó con error (código {code})")
         log_path.write_text("\n".join(self.log), encoding="utf-8")
         if code == 0 and step == "transcribir":
             # índices de palabras nuevos: la edición anterior ya no aplica (queda guardada aparte)
             ed = studio_dir(job) / "edits.json"
             if ed.exists():
                 ed.replace(ed.with_name("edits.anterior.json"))
-        mark(job, step, "hecho" if code == 0 else "error")
+        if self.cancelado:  # no es un error: queda como si no se hubiera hecho
+            st = state_of(job)
+            st["pasos"].pop(step, None)
+            save_state(job, st)
+        else:
+            mark(job, step, "hecho" if code == 0 else "error")
         self.running = False
+
+    def cancel(self) -> bool:
+        """Detiene el paso de verdad: mata su proceso y todo lo que abrió. Una copia que ya empezó termina ese archivo."""
+        if not self.running:
+            return False
+        self.cancelado = True
+        p = self.proc
+        if p and p.poll() is None:
+            kill_tree(p.pid)
+        return True
 
     def _exec(self, job, cmd) -> int:
         kind = cmd[0]
@@ -1241,12 +1280,18 @@ class Task:
         raise ValueError(kind)
 
     def _popen(self, argv, extra_env) -> int:
+        if self.cancelado:
+            return 1
         env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8", **extra_env)
         p = subprocess.Popen(argv, cwd=EDITOR, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW)
+                             text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW,
+                             start_new_session=MAC)
+        self.proc = p
         for line in p.stdout:
             self.say("  " + line)
-        return p.wait()
+        code = p.wait()
+        self.proc = None
+        return code
 
     def _proxy(self, job) -> int:
         """Una sola copia ligera (H.264 720p) con todas las partes seguidas, para el reproductor
@@ -1824,7 +1869,8 @@ def open_claude(job: str, modo: str = "libre", texto: str = "") -> None:
 MODELOS = {"sonnet": "sonnet", "opus": "opus"}  # alias de Claude Code: siempre el último de cada uno
 
 
-def launch_claude(titulo: str, pf: Path, modelo: str = "", env_extra: dict | None = None, instalar: bool = False) -> None:
+def launch_claude(titulo: str, pf: Path, modelo: str = "", env_extra: dict | None = None, instalar: bool = False) -> int | None:
+    """Devuelve el número de proceso de la ventana (en Windows), para poder cerrarla con «Detener todo»."""
     exe = find_claude()
     model = f"--model {MODELOS[modelo]} " if modelo in MODELOS else ""
     if MAC:
@@ -1837,15 +1883,16 @@ def launch_claude(titulo: str, pf: Path, modelo: str = "", env_extra: dict | Non
             raise RuntimeError(CLAUDE_FALTA)
         open_terminal(f"Claude · {titulo}", [*pre, f'{shlex.quote(exe or "claude")} {model}--permission-mode acceptEdits '
                                                   f'"$(cat {shlex.quote(str(pf))})"'], env_extra)
-        return
+        return None
     if not exe:
         raise RuntimeError(CLAUDE_FALTA)
     ps = (f"$Host.UI.RawUI.WindowTitle = 'Claude · {titulo.replace(chr(39), '')}'; "
           "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
           f"Set-Location -LiteralPath '{EDITOR}'; "
           f"& '{exe}' {model}--permission-mode acceptEdits (Get-Content -Raw -Encoding UTF8 -LiteralPath '{pf}')")
-    subprocess.Popen(["powershell.exe", "-NoExit", "-NoProfile", "-Command", ps], cwd=EDITOR,
-                     env={**claude_env(), **(env_extra or {})}, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+    return subprocess.Popen(["powershell.exe", "-NoExit", "-NoProfile", "-Command", ps], cwd=EDITOR,
+                            env={**claude_env(), **(env_extra or {})},
+                            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)).pid
 
 
 # --------------------------------------------------------------------------- lotes: un Claude nuevo por video, en fila
@@ -1866,7 +1913,8 @@ def _queue_save(q: dict) -> None:
     write_json(QUEUE_FILE, q)
 
 
-def start_queue(jobs: list[str], extra: str = "", modo: str = "completo", modelo: str = "", paralelo: int = 1) -> dict:
+def start_queue(jobs: list[str], extra: str = "", modo: str = "completo", modelo: str = "", paralelo: int = 1,
+                solo_claude: bool = False) -> dict:
     jobs = list(dict.fromkeys(j for j in jobs if (PROJECTS / j).is_dir() and raw_clip(j)))
     if not jobs:
         raise ValueError("elige al menos un video (que ya tenga su video importado)")
@@ -1876,7 +1924,7 @@ def start_queue(jobs: list[str], extra: str = "", modo: str = "completo", modelo
     qid = datetime.now().strftime("%Y%m%d-%H%M%S")
     q = {"id": qid, "jobs": jobs, "extra": extra.strip(), "modo": "rapido" if modo == "rapido" else "completo",
          "modelo": modelo if modelo in MODELOS else "", "fase": "transcribiendo", "actual": -1, "inicio_video": 0,
-         "paralelo": 2 if paralelo == 2 else 1, "activos": [], "hechos": [],
+         "paralelo": 2 if paralelo == 2 else 1, "activos": [], "hechos": [], "solo_claude": bool(solo_claude), "ventanas": [],
          "entrega": str(APP_DIR / "cache" / f"entrega-{qid}"), "creado": time.time(), "intentados": [], "entregados": []}
     Path(q["entrega"]).mkdir(parents=True, exist_ok=True)
     for j in jobs:  # para la insignia «en lote» de las tarjetas
@@ -1891,7 +1939,10 @@ def queue_prompt(job: str, k: int, n: int, q: dict) -> str:
     p = claude_prompt(job, "auto", "")
     rapido = MODO_RAPIDO.format(u=USUARIO) if q["modo"] == "rapido" else ""
     extra = f"INSTRUCCIONES PARA ESTE LOTE:\n{q['extra']}\n" if q.get("extra") else ""
-    return (p + "\n\n" + rapido + extra
+    if q.get("solo_claude"):
+        extra += ("TODO EN ESTA VENTANA: la app no preparó nada antes. Si este video todavía no está transcrito, "
+                  "transcríbelo tú aquí como parte del paso 2 y sigue sin esperar nada de la app.\n")
+    return (p + "\n\n" + rapido + extra + f"Lote de la app: {q['id']}.\n"
             + f"Este video es el {k} de {n} de un lote que la app edita "
               + ("de a dos a la vez" if q.get("paralelo") == 2 else "uno por uno")
               + ", cada uno en su propia ventana: haz SOLO este video. "
@@ -1925,15 +1976,20 @@ def _launch_queue_video(q: dict, job: str) -> None:
     pf = studio_dir(job) / "claude-contexto.txt"
     pf.write_text(_plain(queue_prompt(job, k, len(q["jobs"]), q)), encoding="utf-8")
     _activos(q).append({"job": job, "inicio": time.time()})
-    launch_claude(f"{k} de {len(q['jobs'])} · {state_of(job)['titulo']}", pf, q.get("modelo", ""),
-                  {"VE_EXPORT_DIR": to_posix(q["entrega"])})
+    pid = launch_claude(f"{k} de {len(q['jobs'])} · {state_of(job)['titulo']}", pf, q.get("modelo", ""),
+                        {"VE_EXPORT_DIR": to_posix(q["entrega"])})
+    if pid:
+        q.setdefault("ventanas", []).append(pid)
 
 
-def _deliver(q: dict) -> list[str]:
-    """Los videos del lote, juntos a Descargas (o cada uno a su carpeta, con carpeta de mis videos), sin pisar nada."""
+def _deliver(q: dict, solo: list[str] | None = None) -> list[str]:
+    """Los videos del lote, juntos a Descargas (o cada uno a su carpeta, con carpeta de mis videos), sin pisar nada.
+    Con «solo», únicamente los de esos videos."""
     out = []
     for f in sorted(Path(q["entrega"]).glob("*.mp4")):
         job = f.name[:-len(".final.mp4")] if f.name.endswith(".final.mp4") else ""
+        if solo is not None and job not in solo:
+            continue
         dl = export_dir(job) if job and (PROJECTS / job).is_dir() else Path.home() / "Downloads"
         dest, n = dl / f.name, 2
         while dest.exists():
@@ -1949,9 +2005,10 @@ def queue_tick() -> None:
         q = queue_state()
         fase = q.get("fase")
         if fase == "transcribiendo":
-            if TASK.running:
+            if TASK.running and not q.get("solo_claude"):
                 return
-            pend = [j for j in q["jobs"] if not (job_dir(j) / "transcript" / "words.json").exists() and j not in q["intentados"]]
+            pend = [] if q.get("solo_claude") else [
+                j for j in q["jobs"] if not (job_dir(j) / "transcript" / "words.json").exists() and j not in q["intentados"]]
             if pend:  # gratis, con la tarjeta de video; si falla, lo hace Claude en su ventana
                 q["intentados"].append(pend[0])
                 _queue_save(q)
@@ -1995,10 +2052,9 @@ def _queue_fill(q: dict) -> None:
 def queue_control(accion: str) -> dict:
     with _queue_lock:
         q = queue_state()
-        if accion == "detener" and q.get("fase") in ("transcribiendo", "editando"):
-            q["fase"] = "detenido"
-            q["entregados"] = _deliver(q)  # lo que ya esté terminado no se pierde
-        elif accion == "siguiente" and q.get("fase") == "editando":
+        if accion == "parar_todo":
+            return stop_everything(q)
+        if accion == "siguiente" and q.get("fase") == "editando":
             q["saltar"] = True
         elif accion == "cerrar" and q.get("fase") in ("terminado", "detenido"):
             q = {}
@@ -2006,10 +2062,56 @@ def queue_control(accion: str) -> dict:
     return queue_status()
 
 
+def _close_queue_windows(q: dict) -> None:
+    """Cierra las ventanas de Claude de este lote y todo lo que estén corriendo. Se comprueba que el proceso siga siendo
+    esa ventana, porque Windows reutiliza los números (el lote puede venir de antes de reiniciar la app)."""
+    if MAC:
+        subprocess.run(["pkill", "-f", f"Lote de la app: {q.get('id')}"], capture_output=True)
+        return
+    for pid in q.get("ventanas", []):
+        try:
+            cmd = subprocess.run(["powershell.exe", "-NoProfile", "-Command",
+                                  f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"],
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                 timeout=20, creationflags=NO_WINDOW).stdout
+        except (OSError, subprocess.SubprocessError, ValueError):
+            continue
+        if "claude-contexto.txt" in cmd:
+            kill_tree(int(pid))
+
+
+def stop_everything(q: dict) -> dict:
+    """«Detener todo»: cierra las ventanas de Claude del lote, mata lo que la app esté corriendo, cancela lo que estaba
+    en fila y vacía la cola. Lo que ya terminó se entrega; lo que iba a medias queda en su proyecto, sin borrar."""
+    IMPORT_FILA["turno"] += 1
+    TASK.cancel()
+    entregados = []
+    if q:
+        _close_queue_windows(q)
+        hechos = [j for j in q.get("hechos", []) if (PROJECTS / j).is_dir()]
+        if q.get("entrega"):
+            entregados = _deliver(q, hechos)
+            shutil.rmtree(q["entrega"], ignore_errors=True)  # lo que quedó ahí pudo cortarse a medio copiar
+        for j in q.get("jobs", []):
+            if j not in hechos and (PROJECTS / j).is_dir():
+                st = state_of(j)
+                if st.pop("lote", None):
+                    save_state(j, st)
+    _queue_save({})
+    return {**queue_status(), "parado": True, "entregados": entregados}
+
+
+def _task_status() -> dict | None:
+    if not TASK.running or not TASK.job:
+        return None
+    return {"job": TASK.job, "paso": STEP_NAMES.get(TASK.step, TASK.step), "deteniendo": TASK.cancelado,
+            "titulo": state_of(TASK.job).get("titulo", TASK.job) if (PROJECTS / TASK.job).is_dir() else TASK.job}
+
+
 def queue_status() -> dict:
     q = queue_state()
     if not q:
-        return {}
+        return {"tarea": _task_status()}
     vids = []
     act = {a["job"] for a in _activos(q)}
     for j in q.get("jobs", []):
@@ -2019,8 +2121,8 @@ def queue_status() -> dict:
                   "editando" if j in act and q["fase"] == "editando" else
                   "transcribiendo" if q["fase"] == "transcribiendo" and TASK.running and TASK.job == j else "en fila")
         vids.append({"job": j, "titulo": state_of(j)["titulo"], "estado": estado, "avance": run_progress(j)})
-    return ({k: q.get(k) for k in ("id", "fase", "actual", "modo", "modelo", "entregados", "creado", "fin")}
-            | {"paralelo": q.get("paralelo", 1), "videos": vids})
+    return ({k: q.get(k) for k in ("id", "fase", "actual", "modo", "modelo", "entregados", "creado", "fin", "solo_claude")}
+            | {"paralelo": q.get("paralelo", 1), "videos": vids, "tarea": _task_status()})
 
 
 def _queue_loop() -> None:
@@ -2530,7 +2632,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(upload_recordings(dict(body.get("asignar", {}))))
         if parts[:2] == ["api", "lote"]:
             start_queue([str(j) for j in body.get("jobs", [])], str(body.get("instrucciones", "")),
-                        str(body.get("modo", "completo")), str(body.get("modelo", "")), int(body.get("paralelo") or 1))
+                        str(body.get("modo", "completo")), str(body.get("modelo", "")), int(body.get("paralelo") or 1),
+                        bool(body.get("solo_claude")))
             return self._json({"ok": True})
         if parts[:2] == ["api", "projects"]:
             origen = [o for o in (body.get("origenes") or [body.get("origen", "")]) if str(o).strip()]

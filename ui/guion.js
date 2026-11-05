@@ -136,3 +136,17 @@ dropTarget = function () {
   if (t && t.kind === "video") t.msg += " · Un .docx o .txt: su guion";
   return t;
 };
+
+// ------------------------------------------------------------------ carpeta: editar todos solo con Claude
+function editFolderClaude(gid) {
+  LOTE_OPT.solo = "1"; store("lote-solo", "1");
+  editFolder(gid);
+}
+const _renderFoldersNG = renderFolders;
+renderFolders = function () {
+  _renderFoldersNG();
+  const g = gById(groupFilter), at = $("#folders .folder-head .btn.primary");
+  if (!g || !at || LOTE.on || !inFolder(g.id).some((p) => !noVideo(p))) return;
+  at.insertAdjacentHTML("afterend", `<button class="btn claude" id="btn-todo-claude" onclick="editFolderClaude('${g.id}')"
+    title="Se abre Claude de una, sin que la app transcriba antes">🤖 Editar todos con Claude</button>`);
+};
