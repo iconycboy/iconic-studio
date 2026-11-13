@@ -1,0 +1,52 @@
+{
+  "_nota": "Los estilos de título (hook) y subtítulos de Iconic Studio. Medidas en un cuadro de 1080x1920. Las fuentes son las que trae el editor en assets/fonts. «rota: true» = entra en la rotación automática.",
+  "fuentes": {
+    "inter": "Inter-Bold.otf",
+    "inter-black": "Inter-Black.otf",
+    "heros": "texgyreheros-bold.otf",
+    "mono": "IBMPlexMono-Bold.ttf",
+    "serif": "PlayfairDisplay-Italic-VF.ttf"
+  },
+  "estilos": [
+    {
+      "id": "clasico", "nombre": "Clásico", "rota": true,
+      "desc": "Caja blanca con letra negra arriba; subtítulos blancos con contorno.",
+      "hook": {"fuente": "inter", "tam": 64, "color": "#000000", "caja": "#ffffff", "radio": 22, "y": 250},
+      "sub": {"fuente": "inter", "tam": 42, "color": "#ffffff", "contorno": 4, "y": 1500, "palabras": 4, "letras": 20}
+    },
+    {
+      "id": "negro", "nombre": "Bloque negro", "rota": true,
+      "desc": "Caja negra con letra blanca en mayúsculas; subtítulos en mayúsculas.",
+      "hook": {"fuente": "heros", "tam": 60, "color": "#ffffff", "caja": "#000000", "radio": 6, "y": 300, "mayus": true},
+      "sub": {"fuente": "heros", "tam": 46, "color": "#ffffff", "contorno": 5, "y": 1440, "palabras": 3, "letras": 16, "mayus": true}
+    },
+    {
+      "id": "amarillo", "nombre": "Amarillo", "rota": true,
+      "desc": "Título amarillo grande con contorno, sin caja; subtítulos blancos gruesos.",
+      "hook": {"fuente": "inter-black", "tam": 76, "color": "#ffe600", "contorno": 7, "y": 260, "mayus": true},
+      "sub": {"fuente": "inter-black", "tam": 48, "color": "#ffffff", "contorno": 5, "y": 1480, "palabras": 3, "letras": 16}
+    },
+    {
+      "id": "maquina", "nombre": "Máquina de escribir", "rota": true,
+      "desc": "Letra de máquina: título en caja translúcida oscura; subtítulos con fondo oscuro.",
+      "hook": {"fuente": "mono", "tam": 52, "color": "#ffffff", "caja": "#000000b0", "radio": 10, "y": 340},
+      "sub": {"fuente": "mono", "tam": 38, "color": "#ffffff", "caja": "#000000a0", "radio": 8, "y": 1520, "palabras": 4, "letras": 22}
+    },
+    {
+      "id": "revista", "nombre": "Revista", "rota": true,
+      "desc": "Título en letra elegante inclinada, blanco con contorno; subtítulos amarillo claro.",
+      "hook": {"fuente": "serif", "tam": 78, "color": "#ffffff", "contorno": 6, "y": 280},
+      "sub": {"fuente": "inter", "tam": 44, "color": "#fff3a6", "contorno": 4, "y": 1400, "palabras": 4, "letras": 20}
+    },
+    {
+      "id": "nativo", "nombre": "Nativo (tipo TikTok)", "rota": false, "sin_graficos": true,
+      "desc": "Texto blanco con contorno, sin cajas ni tarjetas ni gráficos. Para videos de 8 a 15 s.",
+      "hook": {"fuente": "heros", "tam": 62, "color": "#ffffff", "contorno": 6, "y": 270},
+      "sub": {"fuente": "heros", "tam": 46, "color": "#ffffff", "contorno": 5, "y": 1480, "palabras": 4, "letras": 20}
+    },
+    {
+      "id": "producido", "nombre": "Producido (Claude lo diseña)", "rota": false, "libre": true,
+      "desc": "Edición completa: Claude diseña el título, los subtítulos y los gráficos según tus instrucciones y el estilo de la carpeta, como antes."
+    }
+  ]
+}

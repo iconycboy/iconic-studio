@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.8.0"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.9.0"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
@@ -276,6 +276,9 @@ def project_summary(job: str) -> dict:
         "final": final.exists(),
         "final_url": f"/media/{job}/final.mp4?v={int(final.stat().st_mtime)}" if final.exists() else None,
         "grupo": st.get("grupo", ""),
+        "estilo": style_info_job(job),
+        "legal": read_legal(st.get("grupo", "")),
+        "final_ok": st.get("final_ok") if final.exists() else None,
         "assets": len(read_assets("video", job)),
         "lote": st.get("lote"),
         "instrucciones": st.get("instrucciones", ""),
@@ -367,7 +370,7 @@ def save_assets(scope: str, ident: str, items: list[dict]) -> list[dict]:
             item["nombre"] = str(a.get("nombre") or name)[:120]
         clean.append(item)
     keep = {a["archivo"] for a in clean if "archivo" in a} | {"assets.json", "ASSETS.md", "instrucciones.md", STYLE_FILE,
-                                                               "guiones.json"} | {f.name for f in d.glob("guiones-original.*")}
+                                                               "guiones.json", "aviso-legal.txt"} | {f.name for f in d.glob("guiones-original.*")}
     for f in d.iterdir():
         if f.is_file() and f.name not in keep:
             f.unlink()  # es la copia de la app; el archivo original sigue donde estaba
@@ -1388,9 +1391,15 @@ def run_step(job: str, step: str, body: dict) -> None:
         if not st["subtitulos"]["activos"]:
             mark(job, step, "hecho")
             return
+        if "estilo" in body:
+            set_style(job, str(body.get("estilo") or ""))
+        look = style_for(job)
+        if look.get("libre"):  # «Producido» lo diseña Claude; el paso de la app usa el clásico
+            look = estilo_def("clasico") or look
         TASK.start(job, step, [
-            ["bash", f'uv run {SUBS_BUILDER} "{jp}" --alpha --hook-text "$HOOK_TEXT"',
-             "generando los subtítulos desde la transcripción del corte",
+            ["bash", f'uv run "{to_posix(ESTILOS_BUILDER)}" "{jp}" --estilo {look["id"]} --alpha --hook-text "$HOOK_TEXT"'
+                     + legal_arg(job),
+             f"generando los subtítulos (estilo «{look['nombre']}») desde la transcripción del corte",
              {"HOOK_TEXT": st["subtitulos"]["gancho"]}],
             ["py", lambda t: make_preview(t, job, subs_alpha(job), "preview-subs.mp4")],
         ])
@@ -1797,6 +1806,262 @@ MODO_RAPIDO = (
     "Anota en RUN.md «modo rápido» y lo que se saltó.\n")
 
 
+# --------------------------------------------------------------------------- estilos: título (hook) y subtítulos
+# Para que los videos no se vean todos iguales, la app trae varios looks (ui/estilos/estilos.json) y los ROTA: cada
+# video de una carpeta sale con uno distinto a los últimos usados ahí (historial en projects/_grupos/). Uno se puede
+# fijar; «nativo» es texto simple, sin gráficos. Los dibuja ui/estilos/subtitulos.py sobre el constructor del editor:
+# el hook sale completo desde el primer cuadro y el aviso legal de la carpeta, chico y solo al final.
+ESTILOS_DIR = UI_DIR / "estilos"
+ESTILOS_BUILDER = ESTILOS_DIR / "subtitulos.py"
+ESTILOS_HIST = PROJECTS / "_grupos" / "estilos-historial.json"
+NO_REPETIR = 2  # un estilo no vuelve a salir hasta que pasen estos videos de la carpeta
+LEGAL_FILE = "aviso-legal.txt"
+_estilos_lock = threading.Lock()
+
+
+def estilos() -> list[dict]:
+    return read_json(ESTILOS_DIR / "estilos.json", {}).get("estilos", [])
+
+
+def estilo_def(eid: str) -> dict | None:
+    return next((e for e in estilos() if e["id"] == eid), None)
+
+
+def set_style(job: str, eid: str) -> dict:
+    """Fija un estilo para el video; vacío o «auto» = que lo elija la rotación la próxima vez que se edite."""
+    st = state_of(job)
+    if eid in ("", "auto"):
+        st["estilo"] = {"modo": "auto"}
+    elif estilo_def(eid):
+        st["estilo"] = {"modo": "fijo", "id": eid}
+    else:
+        raise ValueError("ese estilo no existe")
+    save_state(job, st)
+    return style_info_job(job)
+
+
+def style_for(job: str) -> dict:
+    """El estilo con el que se edita este video. Si no tiene, lo elige la rotación de su carpeta y queda anotado."""
+    with _estilos_lock:
+        st = state_of(job)
+        e = st.get("estilo") or {}
+        hist = read_json(ESTILOS_HIST, {})
+        clave = st.get("grupo") or "_sueltos"
+        usados = [h for h in hist.get(clave, []) if h.get("job") != job]
+        d = estilo_def(e.get("id", ""))
+        if not d:
+            rota = [x for x in estilos() if x.get("rota")] or estilos()
+            if not rota:
+                return {"id": "clasico", "nombre": "Clásico", "hook": {}, "sub": {}}
+            ids = [h["estilo"] for h in usados]
+            recientes = set(ids[-min(NO_REPETIR, len(rota) - 1):]) if len(rota) > 1 else set()
+            libres = [x for x in rota if x["id"] not in recientes]
+            # el que hace más que no sale (los nunca usados, primero y en su orden)
+            d = min(libres, key=lambda x: (len(ids) - ids[::-1].index(x["id"])) if x["id"] in ids else -1)
+            st["estilo"] = {"modo": e.get("modo", "auto"), "id": d["id"]}
+            save_state(job, st)
+        hist[clave] = (usados + [{"job": job, "estilo": d["id"], "fecha": datetime.now().isoformat(timespec="seconds")}])[-40:]
+        write_json(ESTILOS_HIST, hist)
+        return d
+
+
+def style_info_job(job: str) -> dict:
+    e = state_of(job).get("estilo") or {}
+    d = estilo_def(e.get("id", ""))
+    return {"modo": e.get("modo", "auto"), "id": d["id"] if d else "", "nombre": d["nombre"] if d else ""}
+
+
+def read_legal(gid: str) -> str:
+    try:
+        p = assets_dir("grupo", gid) / LEGAL_FILE if gid else None
+    except ValueError:
+        p = None
+    return " ".join(p.read_text(encoding="utf-8").split()) if p and p.exists() else ""
+
+
+def save_legal(gid: str, texto: str) -> str:
+    d = assets_dir("grupo", gid)
+    d.mkdir(parents=True, exist_ok=True)
+    texto = " ".join(str(texto).split())[:400]
+    if texto:
+        (d / LEGAL_FILE).write_text(texto + "\n", encoding="utf-8")
+    else:
+        (d / LEGAL_FILE).unlink(missing_ok=True)
+    return texto
+
+
+def legal_arg(job: str, q: str = '"') -> str:
+    gid = state_of(job).get("grupo", "")
+    return f" --legal-file {q}{to_posix(assets_dir('grupo', gid) / LEGAL_FILE)}{q}" if read_legal(gid) else ""
+
+
+def look_for_claude(job: str) -> str:
+    """El estilo de este video y las reglas del título, el aviso legal y el audio, para lo que se le manda a Claude."""
+    d = style_for(job)
+    legal = read_legal(state_of(job).get("grupo", ""))
+    if d.get("libre"):  # edición producida: Claude diseña el look, como siempre
+        txt = (f"LOOK DE ESTE VIDEO: PRODUCIDO. {USUARIO} quiere este video con edición completa: diseña tú el título, los "
+               "subtítulos y los gráficos con el preset, las instrucciones y el ESTILO.md de la carpeta, como siempre.\n"
+               "HOOK DESDE EL PRIMER CUADRO: aun así, el título tiene que leerse completo en el cuadro 0 del video; si lo "
+               "animas, que la animación no retrase la lectura.\n")
+        if legal:
+            txt += (f"AVISO LEGAL de la campaña: «{legal}». Ponlo chico, abajo y solo en los últimos segundos, sin tapar la "
+                    "cara; en ningún otro momento.\n")
+        return txt + ("AUDIO FINAL: no ajustes el volumen del archivo terminado; la app lo deja sola en −14 LUFS con pico "
+                      "máximo de −1 dBTP en cuanto exportas.\n")
+    txt = (
+        f"ESTILO DE ESTE VIDEO: «{d['nombre']}» ({d.get('desc', '')}) La app ROTA el look de un video a otro para que no se "
+        f"vean todos iguales: lo pidió {USUARIO}. El título (hook) y los subtítulos se hacen SOLO con el constructor de la "
+        "app, no con el del preset ni con una animación tuya:\n"
+        f"  uv run '{to_posix(ESTILOS_BUILDER)}' projects/{job} --estilo {d['id']} --alpha --hook-text '<el hook>'"
+        f"{legal_arg(job, chr(39))}\n"
+        "Acepta lo mismo que presets/tiktok/raw/build.py (--hook-only, --hook-end, --out, --until) y además --cap-y / "
+        "--hook-y si el encuadre pide mover los subtítulos o el título. Si las instrucciones de la carpeta o el ESTILO.md "
+        "describen otro look para el título o los subtítulos (pop-up, translúcido, otro color), manda este estilo; todo lo "
+        "demás de esas instrucciones sigue igual.\n"
+        "HOOK DESDE EL PRIMER CUADRO: el título está completo y legible en el cuadro 0 del video, sin animación de "
+        "entrada ni fundido, y nada lo tapa mientras dura. Todo video lleva título: si el guion no trae hook, escribe uno "
+        "corto con lo más fuerte que se dice.\n")
+    if d.get("sin_graficos"):
+        txt += ("MODO NATIVO: este video se ve como hecho en TikTok. Solo el corte, el audio, el título y los subtítulos de "
+                "este estilo. Nada de cajas, tarjetas, pantallas completas, pop-ups, logos animados ni efectos de sonido; "
+                "si hay assets OBLIGATORIOS, ponlos de la forma más simple y corta que cumpla su nota. Está pensado para "
+                "videos de 8 a 15 segundos: corta sin piedad lo que no aporte, pero no quites nada que el guion pida.\n")
+    if legal:
+        txt += (f"AVISO LEGAL de la campaña: «{legal}». Lo pone el constructor solo (--legal-file), chico y abajo, en los "
+                "últimos segundos. No lo pongas en ningún otro momento ni como pop-up, aunque las instrucciones de la "
+                "carpeta digan «siempre»: ya no va así.\n")
+    txt += ("AUDIO FINAL: no ajustes el volumen del archivo terminado; la app lo deja sola en −14 LUFS con pico máximo de "
+            "−1 dBTP en cuanto exportas.\n")
+    return txt
+
+
+# --------------------------------------------------------------------------- el archivo terminado: volumen y primer cuadro
+LUFS_OBJ, TP_MAX = -14.0, -1.0
+FINAL_DESDE = APP_DIR / "cache" / "final-desde.txt"  # solo se tocan los videos terminados después de tener esta versión
+_final_vistos: dict[str, tuple] = {}
+
+
+def _loudness(path: Path) -> tuple[float, float] | None:
+    """(LUFS integrados, pico real en dBTP) del archivo, o None si no tiene audio que medir."""
+    r = subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-i", str(path), "-map", "0:a:0", "-vn",
+                        "-af", "loudnorm=print_format=json", "-f", "null", "-"],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW)
+    a, b = r.stderr.rfind("{"), r.stderr.rfind("}")
+    try:
+        j = json.loads(r.stderr[a:b + 1])
+        i, tp = float(j["input_i"]), float(j["input_tp"])
+    except (ValueError, KeyError):
+        return None
+    return (i, tp) if i > -60 else None  # «-inf»: silencio
+
+
+def master_audio(path: Path) -> dict | None:
+    """Deja el archivo en −14 LUFS con pico máximo de −1 dBTP. Solo se rehace el audio (la imagen se copia tal cual).
+    Si ya está en su sitio no toca nada. Devuelve lo medido al final."""
+    m = _loudness(path)
+    if not m:
+        return None
+    if abs(m[0] - LUFS_OBJ) <= 0.5 and m[1] <= TP_MAX + 0.05:
+        return {"lufs": round(m[0], 1), "tp": round(m[1], 1), "cambiado": False}
+    gain, techo, best = LUFS_OBJ - m[0], -2.0, None
+    tmp = path.with_name(path.stem + ".lufs-tmp.mp4")
+    try:
+        for _ in range(3):
+            lim = 10 ** (techo / 20)
+            af = f"volume={gain:.2f}dB,alimiter=level_in=1:level_out=1:limit={lim:.4f}:attack=5:release=50:level=disabled:latency=1"
+            r = subprocess.run(["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "error", "-i", str(path),
+                                "-map", "0:v?", "-map", "0:a:0", "-c:v", "copy", "-af", af, "-c:a", "aac", "-b:a", "256k",
+                                "-movflags", "+faststart", str(tmp)], capture_output=True, creationflags=NO_WINDOW)
+            m2 = _loudness(tmp) if r.returncode == 0 else None
+            if not m2:
+                return None
+            best = m2
+            if m2[1] > TP_MAX:  # el pico se pasó: baja el techo del limitador
+                techo -= (m2[1] - TP_MAX) + 0.3
+            elif abs(m2[0] - LUFS_OBJ) > 0.5:  # el limitador se comió volumen (o sobró): corrige la ganancia
+                gain += LUFS_OBJ - m2[0]
+            else:
+                break
+        if best[1] > TP_MAX + 0.05:
+            return None
+        tmp.replace(path)
+        return {"lufs": round(best[0], 1), "tp": round(best[1], 1), "cambiado": True}
+    except OSError:
+        return None
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def hook_check(job: str, video: Path) -> bool | None:
+    """¿El título que dibujó la app está en el primer cuadro del video terminado? None = no se pudo comprobar."""
+    if not (studio_dir(job) / "hook.json").exists() or not ESTILOS_BUILDER.exists():
+        return None
+    try:
+        r = subprocess.run(["uv", "run", str(ESTILOS_BUILDER), str(job_dir(job)), "--revisar", str(video)], cwd=EDITOR,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+                           creationflags=NO_WINDOW)
+        return json.loads(r.stdout.strip().splitlines()[-1]).get("hook")
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
+
+
+def check_final(job: str, extra: Path | None = None) -> dict | None:
+    """Revisa el video terminado de un proyecto: volumen a −14 LUFS y título en el primer cuadro. Queda en su estado."""
+    final = job_dir(job) / "outputs" / f"{job}.final.mp4"
+    if not final.exists():
+        return None
+    antes = final.stat().st_size
+    res = master_audio(final) or {}
+    copias = [extra] if extra else []
+    dl = export_dir(job) / final.name
+    if dl.exists() and dl.stat().st_size == antes:  # la copia que dejó el finalize (la misma, sin tocar)
+        copias.append(dl)
+    if res.get("cambiado"):
+        for c in copias:
+            try:
+                shutil.copy2(final, c)
+            except OSError:
+                pass
+    fs = final.stat()
+    res.update({"hook": hook_check(job, final), "firma": [fs.st_mtime_ns, fs.st_size]})
+    st = state_of(job)
+    st["final_ok"] = res
+    save_state(job, st)
+    _final_vistos[job] = (fs.st_mtime_ns, fs.st_size)
+    return res
+
+
+def final_watch() -> None:
+    """Un video recién terminado (por Claude o por la app) se revisa solo, de a uno por vuelta."""
+    if TASK.running or not PROJECTS.exists():
+        return
+    if not FINAL_DESDE.exists():
+        FINAL_DESDE.parent.mkdir(parents=True, exist_ok=True)
+        FINAL_DESDE.write_text(str(time.time()), encoding="utf-8")
+    try:
+        desde = float(FINAL_DESDE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    for job in all_jobs():
+        final = PROJECTS / job / "outputs" / f"{job}.final.mp4"
+        try:
+            fs = final.stat()
+        except OSError:
+            continue
+        sig = (fs.st_mtime_ns, fs.st_size)
+        if fs.st_mtime < desde or _final_vistos.get(job) == sig or time.time() - fs.st_mtime < 15:
+            continue
+        _final_vistos[job] = sig
+        if tuple(state_of(job).get("final_ok", {}).get("firma", [])) == sig:
+            continue
+        check_final(job)
+        return
+
+
 def _plain(text: str) -> str:
     """Sin comillas dobles: PowerShell 5.1 las rompe al pasar el texto a Claude Code."""
     return text.replace('"', "”")
@@ -1829,6 +2094,8 @@ def claude_prompt(job: str, modo: str, texto: str) -> str:
     more = style_for_claude([job]) + material_for_claude()
     if more:
         ctx += more + "\n"
+    if modo in ("auto", "comentarios", "libre"):
+        ctx += look_for_claude(job) + "\n"
     if modo == "auto":
         return ctx + (
             "PEDIDO: edita este video completo, de principio a fin, con el flujo edit-video (los 8 pasos), "
@@ -1914,7 +2181,7 @@ def _queue_save(q: dict) -> None:
 
 
 def start_queue(jobs: list[str], extra: str = "", modo: str = "completo", modelo: str = "", paralelo: int = 1,
-                solo_claude: bool = False) -> dict:
+                solo_claude: bool = False, estilo: str = "") -> dict:
     jobs = list(dict.fromkeys(j for j in jobs if (PROJECTS / j).is_dir() and raw_clip(j)))
     if not jobs:
         raise ValueError("elige al menos un video (que ya tenga su video importado)")
@@ -1927,6 +2194,12 @@ def start_queue(jobs: list[str], extra: str = "", modo: str = "completo", modelo
          "paralelo": 2 if paralelo == 2 else 1, "activos": [], "hechos": [], "solo_claude": bool(solo_claude), "ventanas": [],
          "entrega": str(APP_DIR / "cache" / f"entrega-{qid}"), "creado": time.time(), "intentados": [], "entregados": []}
     Path(q["entrega"]).mkdir(parents=True, exist_ok=True)
+    if estilo == "rotar":  # que la rotación elija de nuevo, uno distinto para cada video
+        for j in jobs:
+            set_style(j, "")
+    elif estilo_def(estilo):
+        for j in jobs:
+            set_style(j, estilo)
     for j in jobs:  # para la insignia «en lote» de las tarjetas
         st = state_of(j)
         st["lote"] = {"fecha": datetime.now().isoformat(timespec="seconds"), "videos": jobs, "modo": q["modo"]}
@@ -1991,6 +2264,10 @@ def _deliver(q: dict, solo: list[str] | None = None) -> list[str]:
         if solo is not None and job not in solo:
             continue
         dl = export_dir(job) if job and (PROJECTS / job).is_dir() else Path.home() / "Downloads"
+        try:
+            master_audio(f)  # −14 LUFS, pico −1 dBTP
+        except Exception:  # noqa: BLE001 (que el volumen no frene la entrega)
+            pass
         dest, n = dl / f.name, 2
         while dest.exists():
             dest, n = dl / f"{f.stem} ({n}){f.suffix}", n + 1
@@ -2131,6 +2408,10 @@ def _queue_loop() -> None:
         try:
             queue_tick()
         except Exception:  # noqa: BLE001 (que un error no pare la cola para siempre: se reintenta)
+            pass
+        try:
+            final_watch()
+        except Exception:  # noqa: BLE001
             pass
 
 
@@ -2411,8 +2692,14 @@ def promote_final(t: Task, job: str) -> int:
             return code
     else:
         shutil.copy2(base, final)
+    t.say("▸ dejando el volumen en −14 LUFS (pico máximo −1 dBTP)…")
     dl = export_dir(job) / f"{job}.final.mp4"
     shutil.copy2(final, dl)
+    res = check_final(job, dl) or {}
+    if "lufs" in res:
+        t.say(f"  ✓ volumen: {res['lufs']} LUFS, pico {res['tp']} dBTP")
+    if res.get("hook") is False:
+        t.say("  ⚠ no encontré el título en el primer cuadro: revisa el inicio del video")
     t.say(f"  ✓ video final: {final}")
     t.say(f"  ✓ copia lista para subir: {dl}")
     return 0
@@ -2524,7 +2811,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(d / Path(parts[3]).name)
         if parts[:2] == ["api", "assets"] and len(parts) == 4 and parts[2] in ASSET_SCOPES:
             return self._json({"assets": read_assets(parts[2], parts[3]), "tipos": sorted(set(ASSET_KIND.values())),
-                               "instrucciones": read_instr(parts[2], parts[3])})
+                               "instrucciones": read_instr(parts[2], parts[3]),
+                               "legal": read_legal(parts[3]) if parts[2] == "grupo" else ""})
+        if parts[:2] == ["api", "estilos"]:
+            return self._json({"estilos": [{k: e.get(k) for k in ("id", "nombre", "desc", "rota", "libre", "sin_graficos")} for e in estilos()]})
         if parts[:2] == ["api", "task"]:
             since = int((url.query.partition("since=")[2] or "0").split("&")[0])
             snap = TASK.snapshot(since)
@@ -2581,6 +2871,8 @@ class Handler(BaseHTTPRequestHandler):
                 open_path(d)
                 return self._json({"ok": True})
             return self._json(set_espacio(str(body.get("ruta", ""))))
+        if parts[:2] == ["api", "legal"] and len(parts) == 3:
+            return self._json({"texto": save_legal(parts[2], body.get("texto", ""))})
         if parts[:2] == ["api", "instrucciones"] and len(parts) == 4 and parts[2] in ASSET_SCOPES:
             return self._json({"texto": save_instr(parts[2], parts[3], body.get("texto", ""))})
         if parts[:2] == ["api", "assets"] and len(parts) == 4 and parts[2] in ASSET_SCOPES:
@@ -2633,7 +2925,7 @@ class Handler(BaseHTTPRequestHandler):
         if parts[:2] == ["api", "lote"]:
             start_queue([str(j) for j in body.get("jobs", [])], str(body.get("instrucciones", "")),
                         str(body.get("modo", "completo")), str(body.get("modelo", "")), int(body.get("paralelo") or 1),
-                        bool(body.get("solo_claude")))
+                        bool(body.get("solo_claude")), str(body.get("estilo", "")))
             return self._json({"ok": True})
         if parts[:2] == ["api", "projects"]:
             origen = [o for o in (body.get("origenes") or [body.get("origen", "")]) if str(o).strip()]
@@ -2686,6 +2978,8 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     edit_parts(job, body.get("orden"), body.get("quitar"))
                 return self._json({"ok": True})
+            if action == "estilo":
+                return self._json(set_style(job, str(body.get("id", ""))))
             if action == "guion":
                 return self._json(set_guion(job, str(body.get("archivo", "")), str(body.get("texto", ""))))
             if action == "voz":

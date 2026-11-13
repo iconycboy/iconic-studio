@@ -13,7 +13,12 @@ la carpeta de al lado. Habla con el usuario en español sencillo.
   guion de UN video, .docx/.txt o pegado, sin Claude: `set_guion`; «Nuevo video» sin grabación), `espacio.js`
   (opcional: «carpeta de mis videos» en Windows, config `espacio`; una carpeta por campaña con `guiones` y `assets`,
   una por video con `assets`, `voice en off` y `raw vid`; `revisar_espacio` mete lo nuevo y el video terminado queda
-  ahí en vez de Descargas; mapa en `projects/_grupos/carpetas.json`))
+  ahí en vez de Descargas; mapa en `projects/_grupos/carpetas.json`), `estilos.js` (looks del título y los
+  subtítulos: `ui/estilos/estilos.json` los define y `ui/estilos/subtitulos.py` los dibuja sobre el `build.py` del
+  editor, con `uv run`; la app los ROTA por carpeta, historial en `projects/_grupos/estilos-historial.json`,
+  `state.json → estilo`; «nativo» = sin gráficos; aviso legal de la carpeta en `aviso-legal.txt`, solo al final; el
+  video terminado queda en −14 LUFS / −1 dBTP y se revisa que el título esté en el primer cuadro: `check_final`,
+  `final_watch`). Lo que va en `ui/` viaja con la actualización de un clic, por eso los estilos viven ahí)
   agrega una función envolviendo las de antes, y se cargan en ese orden.
 - `construir/` — `lanzador.py` (el .exe de PyInstaller: Python + pywebview, que corre el `app.py` suelto de al lado),
   `instalador.iss` (Inno Setup), `publicar.py`, `editor.json` (local, ver `editor.ejemplo.json`), `mac.sh` (la .app
