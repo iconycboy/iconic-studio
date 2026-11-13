@@ -108,8 +108,7 @@ select, input[type=text], textarea { transition: border-color .18s ease, box-sha
 #drop-zone.on .dz-card { animation: cardIn .3s var(--rebote) backwards; }
 
 /* cambiar de pantalla y de paso */
-.view:not(.hidden) { animation: viewIn2 .42s var(--suave) both; }
-@keyframes viewIn2 { from { opacity: 0; transform: translateY(10px) scale(.992); } }
+.view:not(.hidden) { animation: none; }  /* la entrada de cada pantalla la pone data-anim, más abajo */
 .panel > * { animation-name: riseBlur; animation-duration: .4s; animation-timing-function: var(--suave); }
 @keyframes riseBlur { from { opacity: 0; transform: translateY(12px); filter: blur(5px); } }
 .notes:not(.hidden) { animation: notesIn .32s var(--suave) backwards; }
@@ -153,8 +152,48 @@ select, input[type=text], textarea { transition: border-color .18s ease, box-sha
 .btn.primary:not(:disabled):hover, .btn.claude:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 8px 20px -10px var(--accent); }
 .pill { transition: background .25s ease, color .25s ease; }
 
+/* ---------- cada cambio de lugar tiene su movimiento ----------
+   Entrar (a un video, a una carpeta) acerca desde donde tocaste; volver aleja. La pantalla que se va se desvanece
+   encima mientras llega la otra. Los pasos del video entran desde abajo o desde arriba según hacia dónde vas. */
+.view { transform-origin: var(--ox, 50%) var(--oy, 40%); transition: opacity .2s ease, transform .24s var(--suave), display .24s allow-discrete; }
+.view.hidden { position: fixed; inset: 0; z-index: 5; opacity: 0; pointer-events: none; transform: scale(1.03); }
+.view.hidden[data-anim="sale"] { transform: scale(.97); }
+.view[data-anim="entra"]:not(.hidden) { animation: zoomEntra .46s var(--suave) both; }
+.view[data-anim="sale"]:not(.hidden) { animation: zoomSale .42s var(--suave) both; }
+@keyframes zoomEntra { from { opacity: 0; transform: scale(.94); } }
+@keyframes zoomSale { from { opacity: 0; transform: scale(1.05); } }
+.view[data-anim="entra"]:not(.hidden) .topbar { animation: bajaBarra .5s var(--suave) both; }
+@keyframes bajaBarra { from { opacity: 0; transform: translateY(-14px); } }
+.view[data-anim="entra"]:not(.hidden) .steps .step { animation: pasoIn .4s var(--suave) both; }
+.steps .step:nth-child(2) { animation-delay: .04s !important; } .steps .step:nth-child(3) { animation-delay: .08s !important; }
+.steps .step:nth-child(4) { animation-delay: .12s !important; } .steps .step:nth-child(5) { animation-delay: .16s !important; }
+.steps .step:nth-child(n+6) { animation-delay: .2s !important; }
+@keyframes pasoIn { from { opacity: 0; transform: translateX(-14px); } }
+
+.projects-wrap > * { transform-origin: var(--ox, 50%) var(--oy, 30%); }
+.projects-wrap.carpeta-entra > #folders, .projects-wrap.carpeta-entra > #projects { animation: zoomEntra .44s var(--suave) both; }
+.projects-wrap.carpeta-sale > #folders, .projects-wrap.carpeta-sale > #projects { animation: zoomSale .4s var(--suave) both; }
+.projects-wrap.carpeta-entra .folder-head { animation: bajaBarra .5s var(--suave) .06s both; }
+.projects-wrap.carpeta-sale .folder { animation: rise .4s var(--suave) both; }
+.folder { transition: transform .22s var(--suave), box-shadow .25s ease, border-color .2s ease; }
+.folder:nth-child(2) { animation-delay: .05s; } .folder:nth-child(3) { animation-delay: .1s; } .folder:nth-child(4) { animation-delay: .15s; } .folder:nth-child(n+5) { animation-delay: .2s; }
+.folder:hover { transform: translateY(-3px) scale(1.012); }
+.folder:active { transform: scale(.97); }
+.folder .folder-thumbs span { transition: transform .3s var(--rebote); }
+.folder:hover .folder-thumbs span { transform: translateX(calc(var(--i, 0) * 5px)) rotate(calc((var(--i, 0) - 1) * 3deg)); }
+.gchip { transition: background .2s ease, border-color .2s ease, color .2s ease, transform .15s var(--rebote); }
+.gchip:active { transform: scale(.93); }
+.gchip.on { animation: optPick .3s var(--rebote); }
+
+.panel.sube > * { animation-name: bajaBlur; }
+@keyframes bajaBlur { from { opacity: 0; transform: translateY(-14px); filter: blur(5px); } }
+
+/* al elegir una opción, la ventana responde */
+.modal-card.late { animation: cardIn .36s var(--rebote) backwards, late .42s var(--suave); }  /* cardIn sigue en la lista: si no, al quitar «late» la ventana volvería a entrar */
+@keyframes late { 35% { transform: scale(1.014); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow-pop); } }
+.modal-card { transition: transform .2s var(--suave), opacity .18s ease, filter .2s ease, height .3s var(--suave); }
+
 .no-motion .modal, .no-motion .qg-menu, .no-motion .toast, .no-motion #appearance, .no-motion #scrim.on, .no-motion #drop-zone.on {
   -webkit-backdrop-filter: none; backdrop-filter: none; }
 .no-motion .ayuda > div { filter: none; transform: none; }
 .no-motion *, .no-motion *::before, .no-motion *::after { animation: none !important; transition: none !important; }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

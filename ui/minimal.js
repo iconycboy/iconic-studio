@@ -96,6 +96,59 @@ addEventListener("pointermove", (e) => {
   });
 }, { passive: true });
 
+// ------------------------------------------------------------------ cada cambio de lugar tiene su movimiento
+// Entrar acerca desde donde se tocó y volver aleja. Solo se ponen clases y el punto de origen: el dibujo es de CSS.
+let toque = null;
+addEventListener("pointerdown", (e) => { toque = { x: e.clientX, y: e.clientY, t: Date.now() }; }, { capture: true, passive: true });
+function origen(el) {  // el punto que se tocó hace un momento, dentro de «el»
+  if (!el) return;
+  const r = el.getBoundingClientRect(), ok = toque && Date.now() - toque.t < 4000 && r.width;
+  el.style.setProperty("--ox", ok ? `${toque.x - r.left}px` : "50%");
+  el.style.setProperty("--oy", ok ? `${toque.y - r.top}px` : "35%");
+}
+function animar(el, clase, ms) {
+  if (!el) return;
+  el.classList.remove("carpeta-entra", "carpeta-sale", "late", "sube");
+  void el.offsetWidth;
+  el.classList.add(clase);
+  clearTimeout(el._anim);
+  el._anim = setTimeout(() => el.classList.remove(clase), ms || 700);
+}
+const _viewMin = view;
+view = function (name) {
+  const antes = curView, entra = name !== "projects";
+  if (antes !== name) for (const v of ["projects", "project", "style", "help"]) {
+    const el = $(`#view-${v}`);
+    el.dataset.anim = entra ? "entra" : "sale";
+    if (v === name) { el.style.setProperty("--ox", toque && Date.now() - toque.t < 4000 ? `${toque.x}px` : "50%"); el.style.setProperty("--oy", toque && Date.now() - toque.t < 4000 ? `${toque.y}px` : "40%"); }
+  }
+  clearTimeout(view._t);
+  view._t = setTimeout(() => document.querySelectorAll(".view[data-anim]").forEach((el) => delete el.dataset.anim), 800);
+  return _viewMin(name);
+};
+const _setGroupFilterMin = setGroupFilter;
+setGroupFilter = function (id) {
+  const antes = groupFilter;
+  _setGroupFilterMin(id);
+  if (antes === id) return;
+  const w = document.querySelector(".projects-wrap");
+  [...w.children].forEach(origen);
+  animar(w, id ? "carpeta-entra" : "carpeta-sale");
+};
+const _showStepMin = showStep;
+showStep = function (id) {
+  const antes = curStep, orden = ["inicio", ...STEPS.map((s) => s.id)];
+  const r = _showStepMin(id);
+  const P = $("#panel");
+  if (P) P.classList.toggle("sube", antes !== id && orden.indexOf(id) < orden.indexOf(antes));
+  return r;
+};
+// al elegir una opción dentro de una ventana (el modo, el look, el modelo…), la ventana late
+addEventListener("change", (e) => {
+  const o = e.target.closest && e.target.closest(".modal .opts, .modal select");
+  if (o) animar(o.closest(".modal-card"), "late", 450);
+});
+
 // ------------------------------------------------------------------ en el video: el look y los gráficos
 const _renderHomeMin = renderHome;
 renderHome = function (P) {

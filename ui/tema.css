@@ -144,4 +144,3 @@ html { font-size: var(--ui-scale, 14px); }
 body { font-size: var(--ui-scale, 14px); }
 
 .no-motion *, .no-motion *::before, .no-motion *::after { animation: none !important; transition: none !important; }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
