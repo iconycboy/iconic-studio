@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.11.0"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.12.0"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
@@ -2351,7 +2351,9 @@ def open_claude(job: str, modo: str = "libre", texto: str = "") -> None:
     launch_claude(state_of(job)["titulo"], pf, env_extra={"VE_EXPORT_DIR": to_posix(export_dir(job))} if espacio() else None)
 
 
-MODELOS = {"sonnet": "sonnet", "opus": "opus"}  # alias de Claude Code: siempre el último de cada uno
+# alias de Claude Code: siempre el último de cada uno. Fable va con su nombre completo: el alias «fable» de un Claude
+# Code no tan nuevo todavía apunta al 5.1
+MODELOS = {"sonnet": "sonnet", "opus": "opus", "fable": "claude-fable-5-2"}
 
 
 def launch_claude(titulo: str, pf: Path, modelo: str = "", env_extra: dict | None = None, instalar: bool = False) -> int | None:

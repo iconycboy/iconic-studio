@@ -82,6 +82,20 @@ toggleAyuda = function (btn, sel) {
   return _toggleAyudaBase(btn, sel);
 };
 
+// ------------------------------------------------------------------ el brillo de las tarjetas sigue al cursor
+let brilloPend = null;
+addEventListener("pointermove", (e) => {
+  if (brilloPend || document.documentElement.classList.contains("no-motion")) return;
+  brilloPend = requestAnimationFrame(() => {
+    brilloPend = null;
+    const c = e.target.closest && e.target.closest(".card");
+    if (!c) return;
+    const r = c.getBoundingClientRect();
+    c.style.setProperty("--mx", `${e.clientX - r.left}px`);
+    c.style.setProperty("--my", `${e.clientY - r.top}px`);
+  });
+}, { passive: true });
+
 // ------------------------------------------------------------------ en el video: el look y los gráficos
 const _renderHomeMin = renderHome;
 renderHome = function (P) {

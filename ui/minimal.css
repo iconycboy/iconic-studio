@@ -73,5 +73,88 @@
 .modal-card .row.end .btn.big:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 8px 22px -10px var(--accent); }
 select, input[type=text], textarea { transition: border-color .18s ease, box-shadow .2s ease; }
 
+/* ---------- vidrio y aperturas suaves ----------
+   Todo es opacidad, transform y un blur corto sobre piezas chicas (nunca la pantalla entera), para que vaya bien en
+   cualquier PC. Con «Animaciones» apagado en Apariencia se quitan también los fondos con blur. */
+:root { --suave: cubic-bezier(.2, .8, .2, 1); --rebote: cubic-bezier(.2, .9, .25, 1.14); interpolate-size: allow-keywords; }
+
+/* ventanas: el fondo se desenfoca, la tarjeta llega enfocándose y al cerrar se va igual de suave */
+.modal { background: rgba(5,6,10,.48); -webkit-backdrop-filter: blur(10px) saturate(1.25); backdrop-filter: blur(10px) saturate(1.25);
+  animation: fade .24s ease backwards; transition: opacity .2s ease, display .2s allow-discrete; }
+.modal.hidden { opacity: 0; pointer-events: none; }
+.modal-card { animation: cardIn .36s var(--rebote) backwards; transition: transform .2s var(--suave), opacity .18s ease, filter .2s ease; }
+.modal.hidden .modal-card { transform: scale(.96) translateY(10px); opacity: 0; filter: blur(6px); }
+@keyframes cardIn { from { opacity: 0; transform: scale(.93) translateY(16px); filter: blur(8px); } }
+
+/* menús: vidrio y un pop corto desde arriba */
+.qg-menu { background: color-mix(in srgb, var(--bg2) 80%, transparent); -webkit-backdrop-filter: blur(16px) saturate(1.3); backdrop-filter: blur(16px) saturate(1.3);
+  transform-origin: top center; animation: menuIn .2s var(--rebote) backwards; }
+.qg-menu:hover { transform: none; }
+@keyframes menuIn { from { opacity: 0; transform: scale(.92) translateY(-6px); filter: blur(4px); } }
+.qg-menu .step { transition: background .15s ease, padding-left .18s var(--suave); }
+.qg-menu .step:hover { padding-left: 13px; }
+
+/* avisos */
+.toast { background: color-mix(in srgb, var(--bg3) 78%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3);
+  animation: toastIn .34s var(--rebote) backwards; transition: opacity .25s ease, transform .25s var(--suave), filter .25s ease, display .25s allow-discrete; }
+.toast.hidden { opacity: 0; transform: translateX(-50%) translateY(10px) scale(.97); filter: blur(4px); }
+@keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(16px) scale(.95); filter: blur(6px); } }
+
+/* panel de apariencia y soltar archivos */
+#appearance { background: color-mix(in srgb, var(--bg2) 86%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
+  transition: transform .38s var(--suave); }
+#scrim.on { -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); }
+#drop-zone.on { -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); animation: fade .2s ease backwards; }
+#drop-zone.on .dz-card { animation: cardIn .3s var(--rebote) backwards; }
+
+/* cambiar de pantalla y de paso */
+.view:not(.hidden) { animation: viewIn2 .42s var(--suave) both; }
+@keyframes viewIn2 { from { opacity: 0; transform: translateY(10px) scale(.992); } }
+.panel > * { animation-name: riseBlur; animation-duration: .4s; animation-timing-function: var(--suave); }
+@keyframes riseBlur { from { opacity: 0; transform: translateY(12px); filter: blur(5px); } }
+.notes:not(.hidden) { animation: notesIn .32s var(--suave) backwards; }
+@keyframes notesIn { from { opacity: 0; transform: translateX(18px); } }
+
+/* lo que se despliega: la ayuda del «?», «Más opciones» y los detalles técnicos */
+.ayuda > div { filter: blur(5px); transform: translateY(-4px); transition: filter .3s ease, transform .3s var(--suave); }
+.ayuda.open > div { filter: none; transform: none; }
+.mas::details-content { height: 0; overflow: clip; opacity: 0; transition: height .32s var(--suave), opacity .25s ease, content-visibility .32s allow-discrete; }
+.mas[open]::details-content { height: auto; opacity: 1; }
+.console pre { transition: height .3s var(--suave), padding .3s var(--suave), opacity .22s ease, display .3s allow-discrete; }
+.console.collapsed pre { height: 0; padding-top: 0; padding-bottom: 0; opacity: 0; }
+@starting-style { .console:not(.collapsed) pre { height: 0; padding-top: 0; padding-bottom: 0; opacity: 0; } }
+
+/* las tarjetas de los videos: un brillo que sigue al cursor */
+.card::after { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity .3s ease;
+  background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 0%), color-mix(in srgb, var(--accent) 20%, transparent), transparent 70%); }
+.card:hover::after { opacity: 1; }
+.card:active { transform: translateY(-1px) scale(.985); }
+.card .thumb { transition: filter .3s ease; }
+.card:hover .thumb { filter: brightness(1.08) saturate(1.08); }
+
+/* el logo: la I de Iconic es el cursor que recorre la línea de tiempo (el mismo dibujo que icono.ico) */
+.logo { background: color-mix(in srgb, var(--accent) 15%, var(--bg)); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+.logo-mark { width: 20px; height: 20px; overflow: visible; }
+.logo-mark .lm-clips { fill: currentColor; opacity: .42; }
+.logo-mark .lm-i { fill: none; stroke: currentColor; stroke-width: 5.5; stroke-linecap: round; transition: transform .5s var(--rebote); }
+.logo-mark .lm-clips rect { transition: transform .5s var(--suave); }
+.brand:hover .lm-i { transform: translateX(9px); }
+.brand:hover .lm-clips rect:nth-child(1) { transform: translateX(4px); }
+.brand:hover .lm-clips rect:nth-child(3) { transform: translateX(-5px); }
+
+/* la cuenta de Claude: su logo, naranja si está conectada y gris si no */
+#btn-cuenta .claude-mark { width: 19px; height: 19px; stroke-width: 2.3; color: var(--muted); opacity: .6;
+  transition: color .35s ease, opacity .35s ease, filter .35s ease, transform .6s var(--rebote); }
+#btn-cuenta.on .claude-mark { color: #d97757; opacity: 1; filter: drop-shadow(0 0 5px rgba(217,119,87,.55)); transform: rotate(180deg); }
+#btn-cuenta:hover .claude-mark { transform: rotate(40deg) scale(1.1); }
+#btn-cuenta.on:hover .claude-mark { transform: rotate(220deg) scale(1.1); }
+
+/* botones y pasos */
+.btn.primary:not(:disabled):hover, .btn.claude:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 8px 20px -10px var(--accent); }
+.pill { transition: background .25s ease, color .25s ease; }
+
+.no-motion .modal, .no-motion .qg-menu, .no-motion .toast, .no-motion #appearance, .no-motion #scrim.on, .no-motion #drop-zone.on {
+  -webkit-backdrop-filter: none; backdrop-filter: none; }
+.no-motion .ayuda > div { filter: none; transform: none; }
 .no-motion *, .no-motion *::before, .no-motion *::after { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

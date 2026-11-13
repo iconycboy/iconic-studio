@@ -11,14 +11,18 @@ async function loadAccount() {
   renderAccountChip();
   return ACC;
 }
+// el logo de Claude: naranja si hay una cuenta conectada, gris si no
+const CLAUDE_RAYOS = [[-90, 9.6], [-57, 8.5], [-24, 9.6], [9, 8.4], [42, 9.5], [75, 8.6], [108, 9.6], [141, 8.4], [174, 9.5], [207, 8.6], [240, 9.4]];
+const claudeMark = () => `<svg class="ico claude-mark" viewBox="0 0 24 24" aria-hidden="true">${CLAUDE_RAYOS.map(([g, r]) => {
+  const a = g * Math.PI / 180, x = (v) => (12 + v * Math.cos(a)).toFixed(2), y = (v) => (12 + v * Math.sin(a)).toFixed(2);
+  return `<path d="M${x(1.6)} ${y(1.6)}L${x(r)} ${y(r)}"/>`; }).join("")}</svg>`;
 function renderAccountChip() {
   const b = $("#btn-cuenta");
   if (!b) return;
-  if (!ACC) { b.innerHTML = `${ico("user")} Cuenta de Claude`; return; }
-  b.innerHTML = ACC.conectado
-    ? `${ico("user")} <span class="acc-mail">${esc(accWho(ACC).split("@")[0])}</span>`
-    : `${ico("user")} <span class="warn">Sin cuenta de Claude</span>`;
-  b.title = ACC.conectado ? `Claude usa la cuenta de ${accWho(ACC)}. Toca para cambiarla.` : "Ninguna cuenta conectada. Toca para entrar.";
+  const on = !!(ACC && ACC.conectado);
+  if (!b.querySelector(".claude-mark")) b.innerHTML = claudeMark();
+  b.classList.toggle("on", on);
+  b.title = !ACC ? "Cuenta de Claude" : on ? `Claude conectado: usa la cuenta de ${accWho(ACC)}. Toca para cambiarla.` : "Claude sin cuenta conectada. Toca para entrar.";
 }
 
 function openAccount() {
@@ -122,7 +126,7 @@ openLote = async function () {
 document.body.insertAdjacentHTML("beforeend", `<div id="modal-cuenta" class="modal hidden"><div class="modal-card"></div></div>`);
 (() => {
   const b = document.createElement("button");
-  b.className = "btn ghost"; b.id = "btn-cuenta"; b.innerHTML = `${ico("user")} Cuenta de Claude`; b.onclick = openAccount;
+  b.className = "btn ghost icon"; b.id = "btn-cuenta"; b.innerHTML = claudeMark(); b.title = "Cuenta de Claude"; b.onclick = openAccount;
   $("#btn-style").before(b);
 })();
 loadAccount();

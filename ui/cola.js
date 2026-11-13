@@ -28,7 +28,8 @@ openLote = async function () {
       ${opt("modo", "rapido", "⚡ Rápido", "Corte, audio, subtítulos y exportar. Gasta mucho menos: ideal para muchos videos.")}</div>
     <label>Claude</label><div class="opts">
       ${opt("modelo", "sonnet", "Rápido (Sonnet)", "Más rápido y gasta menos de tu plan. Recomendado para lotes.")}
-      ${opt("modelo", "opus", "Máximo (Opus)", "El más capaz, para videos especiales. Gasta más.")}</div>
+      ${opt("modelo", "opus", "Máximo (Opus)", "Muy capaz, para videos especiales. Gasta más.")}
+      ${opt("modelo", "fable", "🌟 Fable 5.2", "El modelo más nuevo y más capaz de Claude. Es el que más gasta de tu plan, y tu cuenta tiene que tenerlo disponible.")}</div>
     <label>Cuántos a la vez</label><div class="opts">
       ${opt("paralelo", "1", "Uno por uno", "El más seguro. Gasta tu plan más despacio.")}
       ${opt("paralelo", "2", "⏩ 2 a la vez", "Terminan antes, pero tu plan se gasta el doble de rápido y la PC va más cargada.")}</div></div>`);
@@ -69,7 +70,7 @@ function renderQueue() {
     terminado: `✅ ¡Listos los ${n} videos! Ya están en tu carpeta Descargas.`,
     detenido: `Lote detenido. ${done ? `Los ${done} terminados están en Descargas.` : ""}` }[q.fase] || "";
   b.innerHTML = `<div class="queue ${q.fase}"><div class="row"><div class="grow"><b>${head}</b>
-      <div class="muted small">${q.solo_claude ? "🤖 Todo con Claude · " : ""}${q.modo === "rapido" ? "⚡ Rápido" : "✨ Completo"} · Claude ${q.modelo === "opus" ? "máximo" : q.modelo === "sonnet" ? "rápido" : ""}
+      <div class="muted small">${q.solo_claude ? "🤖 Todo con Claude · " : ""}${q.modo === "rapido" ? "⚡ Rápido" : "✨ Completo"} · Claude ${q.modelo === "fable" ? "Fable 5.2" : q.modelo === "opus" ? "máximo" : q.modelo === "sonnet" ? "rápido" : ""}
         ${q.fase === "editando" ? "· cada video se abre en su ventana negra; cuando uno termina, la app abre el siguiente sola" : ""}</div></div>
       ${q.fase === "editando" ? `<button class="btn ghost" onclick="queueAction('siguiente')" title="Si Claude ya terminó este video pero la app no lo notó">Pasar al siguiente</button>${STOP_BTN}` : ""}
       ${q.fase === "transcribiendo" ? STOP_BTN : ""}
