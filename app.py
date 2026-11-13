@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.9.0"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.10.0"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
@@ -279,6 +279,8 @@ def project_summary(job: str) -> dict:
         "estilo": style_info_job(job),
         "legal": read_legal(st.get("grupo", "")),
         "final_ok": st.get("final_ok") if final.exists() else None,
+        "graficos": st.get("graficos") if st.get("graficos") in GRAFICOS else "normal",
+        "corta": corta_info(job),
         "assets": len(read_assets("video", job)),
         "lote": st.get("lote"),
         "instrucciones": st.get("instrucciones", ""),
@@ -356,6 +358,8 @@ def save_assets(scope: str, ident: str, items: list[dict]) -> list[dict]:
                 "uso": str(a.get("uso", "")).strip()[:600], "obligatorio": bool(a.get("obligatorio", True))}
         if a.get("voz") and tipo == "audio":  # la voz en off de un guion
             item["voz"] = True
+        if a.get("pantalla") and tipo in ("video", "imagen"):  # grabación de pantalla real (en vez de gráficos del producto)
+            item["pantalla"] = True
         if a.get("origen"):  # de dónde se copió (para no volver a meterlo desde la carpeta de mis videos)
             item["origen"] = str(a["origen"])[:500]
         if tipo == "texto":
@@ -401,12 +405,24 @@ def add_asset_files(scope: str, ident: str, sources: list[str]) -> list[dict]:
     return save_assets(scope, ident, items)
 
 
+def add_pantallas(scope: str, ident: str, sources: list[str]) -> list[dict]:
+    """Grabaciones de pantalla reales del producto: entran como assets marcados «pantalla» (no obligatorios)."""
+    antes = {a["id"] for a in read_assets(scope, ident)}
+    items = add_asset_files(scope, ident, sources)
+    for a in items:
+        if a["id"] not in antes and a["tipo"] in ("video", "imagen"):
+            a["pantalla"], a["obligatorio"] = True, False
+    return save_assets(scope, ident, items)
+
+
 def assets_lines(scope: str, ident: str, items: list[dict]) -> list[str]:
     rel = assets_dir(scope, ident).relative_to(EDITOR).as_posix()
     out = []
     for a in items:
         tag = "OBLIGATORIO" if a.get("obligatorio", True) else "opcional"
         what = (f"texto exacto «{a['texto']}»" if a["tipo"] == "texto" else f"{a['tipo']} {rel}/{a['archivo']}")
+        if a.get("pantalla"):
+            what = "PANTALLA REAL (grabación de pantalla del producto) " + what
         out.append(f"- [{tag}] {what}. Cómo usarlo: {a.get('uso') or '(sin indicación: elige tú el mejor momento)'}")
     return out
 
@@ -875,7 +891,8 @@ def new_empty_job(titulo: str, gid: str, idioma: str, creado: str = "", **extra)
 
 SUB_ASSETS, SUB_VOZ, SUB_RAW, SUB_GUIONES = "assets", "voice en off", "raw vid", "guiones"
 SUELTOS = "Sin carpeta"  # los videos que no están en ninguna campaña
-RESERVADAS = {SUB_ASSETS, SUB_VOZ, SUB_RAW, SUB_GUIONES, SUELTOS.lower()}
+SUB_PANTALLAS = "pantallas"  # en la carpeta de la campaña: grabaciones de pantalla reales del producto
+RESERVADAS = {SUB_ASSETS, SUB_VOZ, SUB_RAW, SUB_GUIONES, SUB_PANTALLAS, SUELTOS.lower()}
 ESPACIO_MAP = PROJECTS / "_grupos" / "carpetas.json"  # {"grupos": {id: ruta}, "ignorar": [rutas]}
 _espacio_lock = threading.RLock()
 
@@ -933,7 +950,7 @@ def campaign_dir(gid: str) -> Path | None:
             d = next((c for c in root.iterdir() if c.is_dir() and c.name.lower() == name.lower()), root / name)
             m["grupos"][gid] = str(d)
             write_json(ESPACIO_MAP, m)
-        for s in (SUB_GUIONES, SUB_ASSETS):
+        for s in (SUB_GUIONES, SUB_ASSETS, SUB_PANTALLAS):
             (d / s).mkdir(parents=True, exist_ok=True)
         return d
 
@@ -1057,6 +1074,10 @@ def revisar_espacio() -> dict:
             if new:
                 add_asset_files("grupo", g["id"], new)
                 hechos.append(f"{len(new)} asset{'s' if len(new) > 1 else ''} de la campaña «{g['nombre']}»")
+            new = _new_files(d / SUB_PANTALLAS, _known_assets("grupo", g["id"]), {"video", "imagen"})
+            if new:
+                add_pantallas("grupo", g["id"], new)
+                hechos.append(f"{len(new)} grabaci{'ones' if len(new) > 1 else 'ón'} de pantalla de «{g['nombre']}»")
             # 2. una carpeta nueva dentro de una campaña es un video nuevo
             for c in sorted(d.iterdir(), key=lambda p: p.name.lower()):
                 key = os.path.normcase(str(c))
@@ -1936,6 +1957,166 @@ def look_for_claude(job: str) -> str:
     return txt
 
 
+# --------------------------------------------------------------------------- menos gráficos y versión corta
+# «graficos» (state.json): normal (como siempre), pocos o ninguno. Las grabaciones de pantalla reales son assets con
+# «pantalla»: Claude las usa en vez del render de la tarjeta o de pantallas de marca. «corta»: Claude solo elige los
+# tramos (studio/corta.json) y la app corta el video terminado con ffmpeg, sin gastar más.
+GRAFICOS = {"normal": "Normal", "pocos": "Pocos", "ninguno": "Ninguno"}
+CORTA_MIN, CORTA_MAX = 10, 15
+
+
+def set_graficos(job: str, nivel: str) -> str:
+    if nivel not in GRAFICOS:
+        raise ValueError("ese nivel de gráficos no existe")
+    st = state_of(job)
+    st["graficos"] = nivel
+    save_state(job, st)
+    return nivel
+
+
+def set_corta(job: str, on: bool) -> dict:
+    st = state_of(job)
+    st["corta"] = bool(on)
+    save_state(job, st)
+    return corta_info(job)
+
+
+def graficos_for_claude(job: str) -> str:
+    st = state_of(job)
+    gid = st.get("grupo", "")
+    nivel = st.get("graficos") if st.get("graficos") in GRAFICOS else "normal"
+    nativo = bool((estilo_def((st.get("estilo") or {}).get("id", "")) or {}).get("sin_graficos"))
+    pant = any(a.get("pantalla") for a in read_assets("video", job) + (read_assets("grupo", gid) if gid else []))
+    txt = ""
+    if pant:
+        txt += ("PANTALLAS REALES: entre los assets hay grabaciones de pantalla reales del producto (marcadas PANTALLA REAL). "
+                "Cuando haya que mostrar el producto o la app, usa un pedazo de esas grabaciones como inserto, recortado a lo "
+                "que se está diciendo, EN VEZ del render de la tarjeta, de mockups o de pantallas completas de marca.\n")
+    if nivel == "pocos" and not nativo:
+        txt += (f"MENOS GRÁFICOS (lo eligió {USUARIO} en la app para este video, porque los videos se sentían anuncio): nada "
+                "de pantallas completas de marca (logo o producto a pantalla completa, intro o cierre de marca) ni el render "
+                "de la tarjeta. Como máximo 2 gráficos chicos en todo el video, y solo si ayudan a entender un dato. "
+                + ("Para mostrar el producto, las pantallas reales. " if pant else
+                   "Si hay que mostrar el producto, que sea breve y chico, sin tapar la cara. ")
+                + "EL PRODUCTO DESPUÉS DEL VALOR: la marca no aparece en pantalla (logo, tarjeta, nombre en un gráfico) hasta "
+                "que el video ya dio al menos un dato útil; no cambies lo que se dice, solo cuándo salen los gráficos. Los "
+                "assets OBLIGATORIOS van igual, de la forma más simple, y si su nota no fija el momento, después de ese primer "
+                "dato. En lo que toca a gráficos, esto manda sobre el ESTILO.md y las instrucciones de la carpeta.\n")
+    elif nivel == "ninguno" and not nativo:
+        txt += (f"SIN GRÁFICOS (lo eligió {USUARIO} en la app para este video): solo el corte, el audio, el título y los "
+                "subtítulos. Ningún gráfico, tarjeta, pantalla de marca, ilustración ni pop-up, aunque el ESTILO.md o las "
+                "instrucciones de la carpeta los pidan. Los assets OBLIGATORIOS van igual, de la forma más simple y corta"
+                + (", y las pantallas reales se pueden usar como inserto" if pant else "") + ".\n")
+    return txt
+
+
+def corta_for_claude(job: str) -> str:
+    if not state_of(job).get("corta"):
+        return ""
+    legal = read_legal(state_of(job).get("grupo", ""))
+    return (
+        f"VERSIÓN CORTA: además del video completo, {USUARIO} quiere una versión de {CORTA_MIN} a {CORTA_MAX} segundos. NO la "
+        f"renderices tú: después de exportar, escribe projects/{job}/studio/corta.json, un JSON normal con la lista «tramos» "
+        f"(pares [inicio, fin] en segundos del video TERMINADO, outputs/{job}.final.mp4) y el texto «por_que» (una frase). La "
+        "app la corta sola y la deja junto al video completo. Reglas: el primer tramo empieza en 0 y es el hook; después, el "
+        "momento más fuerte del video (el dato más útil o sorprendente); 2 o 3 tramos como mucho; cada tramo son frases "
+        "completas, cortadas entre palabras con una décima de margen; tiene que entenderse sola, sin el resto; en total, "
+        f"entre {CORTA_MIN} y {CORTA_MAX} segundos."
+        + (" El último tramo incluye los últimos 3 segundos del video, donde sale el aviso legal." if legal else "")
+        + " Si vuelves a exportar el video, vuelve a escribir corta.json con los tiempos nuevos.\n")
+
+
+def corta_path(job: str) -> Path:
+    return job_dir(job) / "outputs" / f"{job}.corta.mp4"
+
+
+def corta_info(job: str) -> dict:
+    st = state_of(job)
+    f = corta_path(job)
+    ok = st.get("corta_ok") or {}
+    return {"on": bool(st.get("corta")), "lista": f.exists(), "seg": ok.get("seg"), "error": ok.get("error", ""),
+            "url": f"/media/{job}/corta.mp4?v={int(f.stat().st_mtime)}" if f.exists() else None}
+
+
+def corta_tramos(job: str, dur: float) -> list[tuple[float, float]]:
+    j = read_json(studio_dir(job) / "corta.json", {})
+    out: list[tuple[float, float]] = []
+    for x in (j.get("tramos") or []) if isinstance(j, dict) else []:
+        try:
+            a, b = max(0.0, float(x[0])), min(dur, float(x[1]))
+        except (TypeError, ValueError, IndexError, KeyError):
+            continue
+        if b - a < 0.3:
+            continue
+        if out and a <= out[-1][1] + 0.05 and a >= out[-1][0]:  # pegado al anterior: es el mismo tramo
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
+
+
+def build_corta(job: str) -> dict:
+    """Corta la versión corta del video terminado con los tramos que eligió Claude. Queda junto al completo."""
+    final = job_dir(job) / "outputs" / f"{job}.final.mp4"
+    dur = float(probe_clip(final).get("dur") or 0)
+    tr = corta_tramos(job, dur) if dur else []
+    total = sum(b - a for a, b in tr)
+    if not tr or not (CORTA_MIN - 4 <= total <= CORTA_MAX + 6):
+        return {"error": "los tramos de la versión corta no sirven" + (f" (suman {total:.0f} s)" if tr else "")}
+    fc = ""
+    for i, (a, b) in enumerate(tr):
+        d = b - a
+        fc += (f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS[v{i}];"
+               f"[0:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS,afade=t=in:d=0.03,afade=t=out:st={d - 0.03:.3f}:d=0.03[a{i}];")
+    fc += "".join(f"[v{i}][a{i}]" for i in range(len(tr))) + f"concat=n={len(tr)}:v=1:a=1[v][a]"
+    out = corta_path(job)
+    tmp = out.with_name(out.stem + ".tmp.mp4")
+    try:
+        r = subprocess.run(["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "error", "-i", str(final),
+                            "-filter_complex", fc, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast",
+                            "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart",
+                            str(tmp)], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           creationflags=NO_WINDOW)
+        if r.returncode != 0 or not tmp.exists():
+            return {"error": "no se pudo cortar la versión corta: " + (r.stderr.strip().splitlines() or ["ffmpeg falló"])[-1][:200]}
+        master_audio(tmp)
+        tmp.replace(out)
+        try:
+            shutil.copy2(out, export_dir(job) / out.name)
+        except OSError:
+            pass
+        return {"seg": round(total, 1)}
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def corta_watch() -> bool:
+    """Si Claude dejó los tramos de una versión corta y el video terminado ya está revisado, la corta. De a una."""
+    for job in all_jobs():
+        cj = PROJECTS / job / "studio" / "corta.json"
+        final = PROJECTS / job / "outputs" / f"{job}.final.mp4"
+        try:
+            fs, cs = final.stat(), cj.stat()
+        except OSError:
+            continue
+        st = state_of(job)
+        firma = [fs.st_mtime_ns, fs.st_size, cs.st_mtime_ns]
+        if (time.time() - cs.st_mtime < 5 or (st.get("final_ok") or {}).get("firma") != firma[:2]
+                or (st.get("corta_ok") or {}).get("firma") == firma):
+            continue
+        res = build_corta(job)
+        st = state_of(job)
+        st["corta_ok"] = {**res, "firma": firma}
+        save_state(job, st)
+        if "seg" in res:
+            notify("Versión corta lista ✂️", f"«{st['titulo']}»: {res['seg']} s, junto al video completo")
+        return True
+    return False
+
+
 # --------------------------------------------------------------------------- el archivo terminado: volumen y primer cuadro
 LUFS_OBJ, TP_MAX = -14.0, -1.0
 FINAL_DESDE = APP_DIR / "cache" / "final-desde.txt"  # solo se tocan los videos terminados después de tener esta versión
@@ -2060,6 +2241,7 @@ def final_watch() -> None:
             continue
         check_final(job)
         return
+    corta_watch()
 
 
 def _plain(text: str) -> str:
@@ -2095,7 +2277,12 @@ def claude_prompt(job: str, modo: str, texto: str) -> str:
     if more:
         ctx += more + "\n"
     if modo in ("auto", "comentarios", "libre"):
-        ctx += look_for_claude(job) + "\n"
+        ctx += look_for_claude(job) + graficos_for_claude(job) + corta_for_claude(job) + "\n"
+    if modo == "corta":
+        return ctx + (
+            f"PEDIDO: {USUARIO} quiere una versión corta de este video, que ya está terminado. No vuelvas a editarlo ni a "
+            "exportarlo: solo elige los tramos.\n" + (corta_for_claude(job) or "")
+            + "Cuando escribas corta.json, dile en una línea qué partes elegiste y que la app la deja lista en un momento.")
     if modo == "auto":
         return ctx + (
             "PEDIDO: edita este video completo, de principio a fin, con el flujo edit-video (los 8 pasos), "
@@ -2181,7 +2368,7 @@ def _queue_save(q: dict) -> None:
 
 
 def start_queue(jobs: list[str], extra: str = "", modo: str = "completo", modelo: str = "", paralelo: int = 1,
-                solo_claude: bool = False, estilo: str = "") -> dict:
+                solo_claude: bool = False, estilo: str = "", graficos: str = "", corta: bool | None = None) -> dict:
     jobs = list(dict.fromkeys(j for j in jobs if (PROJECTS / j).is_dir() and raw_clip(j)))
     if not jobs:
         raise ValueError("elige al menos un video (que ya tenga su video importado)")
@@ -2200,6 +2387,11 @@ def start_queue(jobs: list[str], extra: str = "", modo: str = "completo", modelo
     elif estilo_def(estilo):
         for j in jobs:
             set_style(j, estilo)
+    for j in jobs:
+        if graficos in GRAFICOS:
+            set_graficos(j, graficos)
+        if corta is not None:
+            set_corta(j, corta)
     for j in jobs:  # para la insignia «en lote» de las tarjetas
         st = state_of(j)
         st["lote"] = {"fecha": datetime.now().isoformat(timespec="seconds"), "videos": jobs, "modo": q["modo"]}
@@ -2781,6 +2973,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(p) if UI_DIR in p.parents else self._json({}, 404)
         if parts[0] == "media" and len(parts) == 3 and parts[2] == "final.mp4":
             return self._file(job_dir(parts[1]) / "outputs" / f"{parts[1]}.final.mp4")
+        if parts[0] == "media" and len(parts) == 3 and parts[2] == "corta.mp4":
+            return self._file(corta_path(parts[1]))
         if parts[0] == "media" and len(parts) == 3 and parts[2] in MEDIA:
             return self._file(studio_dir(parts[1]) / parts[2])
         if parts[:2] == ["api", "projects"]:
@@ -2883,7 +3077,8 @@ class Handler(BaseHTTPRequestHandler):
                 open_path(d)
                 return self._json({"ok": True})
             if body.get("agregar"):
-                return self._json({"assets": add_asset_files(scope, ident, [str(s) for s in body["agregar"]])})
+                add = add_pantallas if body.get("pantalla") and scope != "material" else add_asset_files
+                return self._json({"assets": add(scope, ident, [str(s) for s in body["agregar"]])})
             return self._json({"assets": save_assets(scope, ident, list(body.get("assets", [])))})
         if parts[:2] == ["api", "reglas"]:
             write_rules([str(r) for r in body.get("reglas", [])])
@@ -2925,7 +3120,8 @@ class Handler(BaseHTTPRequestHandler):
         if parts[:2] == ["api", "lote"]:
             start_queue([str(j) for j in body.get("jobs", [])], str(body.get("instrucciones", "")),
                         str(body.get("modo", "completo")), str(body.get("modelo", "")), int(body.get("paralelo") or 1),
-                        bool(body.get("solo_claude")), str(body.get("estilo", "")))
+                        bool(body.get("solo_claude")), str(body.get("estilo", "")), str(body.get("graficos", "")),
+                        bool(body["corta"]) if "corta" in body else None)
             return self._json({"ok": True})
         if parts[:2] == ["api", "projects"]:
             origen = [o for o in (body.get("origenes") or [body.get("origen", "")]) if str(o).strip()]
@@ -2980,6 +3176,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True})
             if action == "estilo":
                 return self._json(set_style(job, str(body.get("id", ""))))
+            if action == "graficos":
+                return self._json({"graficos": set_graficos(job, str(body.get("nivel", "")))})
+            if action == "corta":
+                if body.get("pedir"):  # el video ya está terminado: Claude solo elige los tramos
+                    if not (job_dir(job) / "outputs" / f"{job}.final.mp4").exists():
+                        raise ValueError("primero termina el video: la versión corta sale del video terminado")
+                    set_corta(job, True)
+                    open_claude(job, "corta")
+                    return self._json(corta_info(job))
+                return self._json(set_corta(job, bool(body.get("on"))))
             if action == "guion":
                 return self._json(set_guion(job, str(body.get("archivo", "")), str(body.get("texto", ""))))
             if action == "voz":

@@ -18,7 +18,11 @@ la carpeta de al lado. Habla con el usuario en español sencillo.
   editor, con `uv run`; la app los ROTA por carpeta, historial en `projects/_grupos/estilos-historial.json`,
   `state.json → estilo`; «nativo» = sin gráficos; aviso legal de la carpeta en `aviso-legal.txt`, solo al final; el
   video terminado queda en −14 LUFS / −1 dBTP y se revisa que el título esté en el primer cuadro: `check_final`,
-  `final_watch`). Lo que va en `ui/` viaja con la actualización de un clic, por eso los estilos viven ahí)
+  `final_watch`). Lo que va en `ui/` viaja con la actualización de un clic, por eso los estilos viven ahí),
+  `graficos.js` (cuántos gráficos lleva el video: `state.json → graficos` normal/pocos/ninguno; grabaciones de
+  pantalla reales = assets con `pantalla`, también desde la subcarpeta `pantallas` de la campaña; versión corta de
+  10 a 15 s: Claude solo escribe `studio/corta.json` con los tramos y la app la corta del video terminado con
+  ffmpeg, `corta_watch` → `outputs/<job>.corta.mp4`)
   agrega una función envolviendo las de antes, y se cargan en ese orden.
 - `construir/` — `lanzador.py` (el .exe de PyInstaller: Python + pywebview, que corre el `app.py` suelto de al lado),
   `instalador.iss` (Inno Setup), `publicar.py`, `editor.json` (local, ver `editor.ejemplo.json`), `mac.sh` (la .app
