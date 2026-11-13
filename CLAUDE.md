@@ -22,7 +22,8 @@ la carpeta de al lado. Habla con el usuario en español sencillo.
   `graficos.js` (cuántos gráficos lleva el video: `state.json → graficos` normal/pocos/ninguno; grabaciones de
   pantalla reales = assets con `pantalla`, también desde la subcarpeta `pantallas` de la campaña; versión corta de
   10 a 15 s: Claude solo escribe `studio/corta.json` con los tramos y la app la corta del video terminado con
-  ffmpeg, `corta_watch` → `outputs/<job>.corta.mp4`)
+  ffmpeg, `corta_watch` → `outputs/<job>.corta.mp4`), `minimal.js` + `minimal.css` (solo presentación: las opciones
+  del lote como pastillas con «?» y «Más opciones», muestras de cada estilo, animaciones)
   agrega una función envolviendo las de antes, y se cargan en ese orden.
 - `construir/` — `lanzador.py` (el .exe de PyInstaller: Python + pywebview, que corre el `app.py` suelto de al lado),
   `instalador.iss` (Inno Setup), `publicar.py`, `editor.json` (local, ver `editor.ejemplo.json`), `mac.sh` (la .app
@@ -30,7 +31,9 @@ la carpeta de al lado. Habla con el usuario en español sencillo.
 - Mac: `MAC` en `app.py` (Terminal en vez de PowerShell, Finder, Papelera, avisos con osascript) y `ui/sistema.js`
   (los textos dicen Finder / Terminal / Mac / ⌘). La .app la compila GitHub en cada release
   (`.github/workflows/mac.yml`); el editor que lleva lo baja de la release «editor», que sube `publicar.py`.
-- No se suben (ver `.gitignore`): `config.json`, `grupos.json`, `cache/`, `build/`.
+- No se suben (ver `.gitignore`): `config.json`, `prefs.json`, `grupos.json`, `cache/`, `build/`.
+- Lo personalizado en la interfaz (apariencia, recorridos vistos, opciones del lote) pasa por `store()` de `app.js`
+  y queda en `prefs.json` (llega a la página en `/prefs.js`, se guarda con `/api/prefs`); las actualizaciones no lo tocan.
 - Debe funcionar con Python 3.10, 3.11 y 3.12: nada de `\` dentro de las llaves de un f-string.
 
 ## Publicar una versión nueva

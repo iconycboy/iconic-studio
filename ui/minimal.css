@@ -1,0 +1,77 @@
+/* Iconic Studio — opciones más limpias: cada grupo es una fila de pastillas con solo el nombre; la explicación sale
+   en una línea (la de lo elegido) y completa al tocar el «?». Y movimiento suave en lo que cambia. */
+
+/* ---------- pastillas ---------- */
+.opts.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.opts.seg .opt { flex-direction: row; align-items: center; gap: 6px; padding: 6px 13px; border-radius: 99px; background: transparent;
+  color: var(--muted); transition: background .18s ease, border-color .18s ease, color .18s ease, transform .12s ease, box-shadow .2s ease; }
+.opts.seg .opt > span { display: none; }
+.opts.seg .opt b { font-weight: 500; white-space: nowrap; }
+.opts.seg .opt:hover { border-color: var(--line-strong, var(--muted)); color: var(--text); }
+.opts.seg .opt:active { transform: scale(.96); }
+.opts.seg .opt.on { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); animation: optPick .28s cubic-bezier(.2,.9,.3,1.4); }
+.opts.seg .opt.on b { font-weight: 600; }
+.opts.seg .opt select { width: auto; flex: none; height: 20px; min-height: 0; padding: 0 4px; font-size: 12px; border-radius: 99px; background: transparent; border-color: transparent; color: inherit; max-width: 150px; }
+@keyframes optPick { 0% { transform: scale(.94); } 60% { transform: scale(1.03); } }
+
+.lote-opts { gap: 2px; }
+.lote-opts > label, .mas-body > label { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 12px; letter-spacing: .02em; }
+.opt-now { margin: 6px 2px 0; min-height: 1.3em; font-size: 12px; color: var(--muted); }
+.opt-now.cambia { animation: nowIn .25s ease both; }
+@keyframes nowIn { from { opacity: 0; transform: translateY(-3px); } }
+
+/* ---------- el «?» y su ayuda ---------- */
+.q { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; padding: 0; border-radius: 50%; border: 1px solid var(--line);
+  background: transparent; color: var(--muted); font: 600 11px/1 var(--font-ui, inherit); cursor: pointer;
+  transition: background .18s ease, color .18s ease, border-color .18s ease, transform .18s ease; }
+.q:hover { color: var(--text); border-color: var(--accent); transform: scale(1.12); }
+.q.on { background: var(--accent); border-color: var(--accent); color: #fff; transform: rotate(360deg); }
+.ayuda { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .28s ease, opacity .22s ease, margin .28s ease; }
+.ayuda.open { grid-template-rows: 1fr; opacity: 1; margin: 8px 0 2px; }
+.ayuda > div { overflow: hidden; min-height: 0; }
+.ayuda ul { list-style: none; margin: 0; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; border-radius: var(--r-lg, 12px);
+  background: color-mix(in srgb, var(--bg3) 60%, transparent); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.ayuda li { display: flex; gap: 10px; align-items: baseline; }
+.ayuda li b { color: var(--text); font-weight: 600; white-space: nowrap; }
+.ayuda li.sub { padding-left: 12px; }
+.ayuda p { margin: 0; }
+
+/* muestra de cómo se ve el título de cada estilo */
+.muestra { flex: none; align-self: center; display: inline-grid; place-items: center; width: 74px; height: 30px; border-radius: 6px; overflow: hidden;
+  background: linear-gradient(135deg, #4b5263, #2c303b); }
+.muestra i { font-style: normal; font-size: 11px; line-height: 1; padding: 3px 6px; white-space: nowrap; }
+
+/* ---------- «Más opciones» ---------- */
+.mas { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.mas > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); user-select: none; }
+.mas > summary::-webkit-details-marker { display: none; }
+.mas > summary::before { content: "›"; display: inline-block; font-size: 15px; transition: transform .2s ease; }
+.mas[open] > summary::before { transform: rotate(90deg); }
+.mas > summary:hover { color: var(--text); }
+.mas > summary .resumen { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 62%; opacity: .85; }
+.mas[open] > summary .resumen { opacity: 0; }
+.mas[open] .mas-body { animation: rise .25s ease both; }
+
+/* ---------- la tarjeta del look en el video ---------- */
+#card-estilo h3 .q, #card-graficos h3 .q { margin-left: 2px; }
+#card-estilo select, #card-graficos select { transition: border-color .18s ease, box-shadow .2s ease; }
+#card-estilo select:focus, #card-graficos select:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); border-color: var(--accent); }
+#card-graficos { border-top-color: var(--line) !important; }
+
+/* ---------- movimiento general ---------- */
+.box { transition: border-color .2s ease, box-shadow .25s ease, transform .2s ease; }
+.box:hover { border-color: color-mix(in srgb, var(--accent) 22%, var(--line)); }
+.panel > *:nth-child(5) { animation-delay: .16s; } .panel > *:nth-child(6) { animation-delay: .2s; }
+.panel > *:nth-child(7) { animation-delay: .24s; } .panel > *:nth-child(n+8) { animation-delay: .28s; }
+.card:hover { transform: translateY(-2px); box-shadow: 0 10px 28px -14px rgba(0,0,0,.55); }
+.chip, .tagpill { transition: background .18s ease, border-color .18s ease, transform .12s ease; }
+.chip:active { transform: scale(.95); }
+.check input { transition: transform .15s cubic-bezier(.2,.9,.3,1.6); }
+.check input:checked { animation: pop .25s ease; }
+.asset { animation: rise .25s ease both; }
+.modal-card .row.end .btn.big:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 8px 22px -10px var(--accent); }
+select, input[type=text], textarea { transition: border-color .18s ease, box-shadow .2s ease; }
+
+.no-motion *, .no-motion *::before, .no-motion *::after { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

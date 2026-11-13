@@ -1,5 +1,6 @@
 # lo de cada PC: ajustes, carpetas, caché, registros
 config.json
+prefs.json
 grupos.json
 cache/
 # lo que arma publicar.py

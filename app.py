@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-APP_VERSION = "1.10.0"  # publicar.py la sube en cada versión nueva
+APP_VERSION = "1.11.0"  # publicar.py la sube en cada versión nueva
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
 CONFIG_FILE = APP_DIR / "config.json"
@@ -84,6 +84,36 @@ BASH = CFG["git_bash"]
 USUARIO = CFG["usuario"]
 RULES = EDITOR / "my-rules.md"
 RULES_HEAD = "Write your rules below, one per line."  # lo de arriba es la explicación del editor, no reglas
+
+
+# Lo que cada quien personalizó en la interfaz (colores, tema, tamaño, lo ya visto, las opciones del lote). Antes vivía
+# solo en la memoria de la ventana (localStorage) y a veces se perdía al actualizar; ahora queda en un archivo de la app
+# que las actualizaciones no tocan, igual que config.json.
+PREFS_FILE = APP_DIR / "prefs.json"
+_prefs_lock = threading.Lock()
+
+
+def read_prefs() -> dict:
+    try:
+        p = json.loads(PREFS_FILE.read_text(encoding="utf-8"))
+        return p if isinstance(p, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_prefs(nuevos: dict) -> bool:
+    with _prefs_lock:
+        p = read_prefs()
+        for k, v in nuevos.items():
+            k = str(k)[:80]
+            if v is None:
+                p.pop(k, None)
+            elif len(p) < 300 or k in p:
+                p[k] = str(v)[:20000]
+        tmp = PREFS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(p, indent=1, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(PREFS_FILE)
+    return True
 
 
 def to_posix(p: Path | str) -> str:
@@ -1747,7 +1777,8 @@ def _restart() -> None:
     elif bundle and bundle.suffix == ".app":  # la app de Mac se vuelve a abrir entera, con su ícono en el Dock
         subprocess.Popen(["open", "-n", str(bundle)])
     else:
-        subprocess.Popen(cmd, cwd=APP_DIR, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+        subprocess.Popen(cmd, cwd=APP_DIR, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
+                         env={**os.environ, "ICONIC_REINICIO": "1"})
     os._exit(0)
 
 
@@ -2966,6 +2997,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _get(self, url):
         parts = [unquote(p) for p in url.path.strip("/").split("/") if p]
+        if parts == ["prefs.js"]:  # lo personalizado, antes que nada: la página lo lee al cargar
+            body = ("window.PREFS = " + json.dumps(read_prefs(), ensure_ascii=False).replace("</", "<\\/") + ";").encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return None
         if not parts:
             return self._file(UI_DIR / "index.html")
         if parts[0] == "ui":
@@ -3008,7 +3048,7 @@ class Handler(BaseHTTPRequestHandler):
                                "instrucciones": read_instr(parts[2], parts[3]),
                                "legal": read_legal(parts[3]) if parts[2] == "grupo" else ""})
         if parts[:2] == ["api", "estilos"]:
-            return self._json({"estilos": [{k: e.get(k) for k in ("id", "nombre", "desc", "rota", "libre", "sin_graficos")} for e in estilos()]})
+            return self._json({"estilos": [{k: e.get(k) for k in ("id", "nombre", "desc", "rota", "libre", "sin_graficos", "hook")} for e in estilos()]})
         if parts[:2] == ["api", "task"]:
             since = int((url.query.partition("since=")[2] or "0").split("&")[0])
             snap = TASK.snapshot(since)
@@ -3065,6 +3105,8 @@ class Handler(BaseHTTPRequestHandler):
                 open_path(d)
                 return self._json({"ok": True})
             return self._json(set_espacio(str(body.get("ruta", ""))))
+        if parts[:2] == ["api", "prefs"]:
+            return self._json({"ok": save_prefs(dict(body.get("prefs") or {}))})
         if parts[:2] == ["api", "legal"] and len(parts) == 3:
             return self._json({"texto": save_legal(parts[2], body.get("texto", ""))})
         if parts[:2] == ["api", "instrucciones"] and len(parts) == 4 and parts[2] in ASSET_SCOPES:
@@ -3365,9 +3407,15 @@ def main():
         # siempre la misma dirección: la página guarda lo ya visto (el recorrido, la apariencia, «no volver a mostrar»)
         # por dirección, y con un puerto distinto en cada arranque lo olvidaba todo. Si está ocupado (la app ya
         # abierta dos veces), uno libre cualquiera.
-        try:
-            server = ExclusiveServer(("127.0.0.1", APP_PORT), Handler)
-        except OSError:
+        server = None
+        # recién actualizada, la app anterior puede tardar un momento en soltar la dirección: se le espera
+        for _ in range(16 if os.environ.pop("ICONIC_REINICIO", "") else 1):
+            try:
+                server = ExclusiveServer(("127.0.0.1", APP_PORT), Handler)
+                break
+            except OSError:
+                time.sleep(0.5)
+        if server is None:
             server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     if port:  # solo servidor (pruebas)

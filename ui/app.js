@@ -236,7 +236,33 @@ $("#p-notes").addEventListener("input", saveMeta);
 function toggleNotes() { $("#notes").classList.toggle("hidden"); }
 function toggleConsole() { $("#console").classList.toggle("collapsed"); }
 // ------------------------------------------------------------------ Claude (ventana aparte)
-function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+// Lo personalizado (apariencia, lo ya visto, opciones del lote) se guarda en un archivo de la app (prefs.json, llega en
+// /prefs.js) para que no se pierda al actualizar; la memoria de la ventana queda de respaldo.
+const PREFS = window.PREFS || {};
+let prefsCola = {}, prefsTimer = null;
+function prefsSend(k, v) {
+  prefsCola[k] = v;
+  clearTimeout(prefsTimer);
+  prefsTimer = setTimeout(() => {
+    const prefs = prefsCola; prefsCola = {};
+    fetch("/api/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prefs }), keepalive: true }).catch(() => {});
+  }, 300);
+}
+function store(k, v) {
+  if (v === undefined) {
+    if (k in PREFS) return PREFS[k];
+    try { return localStorage.getItem(k); } catch (e) { return null; }
+  }
+  v = String(v);
+  if (PREFS[k] !== v) { PREFS[k] = v; prefsSend(k, v); }
+  try { localStorage.setItem(k, v); } catch (e) { /* sin memoria de ventana: queda el archivo */ }
+}
+try {  // lo que ya estaba guardado en la ventana pasa al archivo la primera vez
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!(k in PREFS)) { PREFS[k] = localStorage.getItem(k); prefsSend(k, PREFS[k]); }
+  }
+} catch (e) { /* nada que pasar */ }
 let pendingClaude = null;
 function openClaude(modo, texto) {
   pendingClaude = { modo, texto: texto || "" };
